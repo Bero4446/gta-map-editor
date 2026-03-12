@@ -1,75 +1,100 @@
 <!DOCTYPE html>
 <html lang="de">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>GTA RP Map</title>
 
-  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
-  <link rel="stylesheet" href="style.css"/>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <link rel="stylesheet" href="style.css" />
 
   <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 </head>
 <body>
-
   <div class="topbar">
     <div class="logo">GTA RP MAP</div>
 
     <div class="top-actions">
       <button id="discordLogin">Discord Login</button>
-      <button id="adminLogin">Admin Login</button>
+      <button id="logoutBtn" class="secondary">Logout</button>
       <span id="loginStatus">Nicht eingeloggt</span>
     </div>
   </div>
 
-  <div id="map"></div>
+  <div id="mapWrap">
+    <div id="map"></div>
 
-  <div id="panel">
-    <div id="panelToggle">☰</div>
+    <div id="panel" class="open">
+      <div id="panelToggle">☰</div>
 
-    <div class="tabs">
-      <button class="tab active" data-tab="editor">Editor</button>
-      <button class="tab" data-tab="filter">Filter</button>
-      <button class="tab" data-tab="stats">Statistik</button>
-    </div>
+      <div class="tabs">
+        <button class="tab active" data-tab="editor">Editor</button>
+        <button class="tab" data-tab="filter">Filter</button>
+        <button class="tab" data-tab="stats">Statistik</button>
+        <button class="tab vip-only" data-tab="vip">VIP</button>
+      </div>
 
-    <div class="tab-content active" id="editor">
-      <h2>Marker Editor</h2>
+      <div class="tab-content active" id="editor">
+        <h2>Marker Editor</h2>
 
-      <input id="markerSearch" placeholder="🔍 Marker suchen">
-      <input id="markerName" placeholder="Name">
-      <input id="markerDescription" placeholder="Beschreibung">
+        <div class="status-box" id="roleInfo">
+          Nicht eingeloggt
+        </div>
 
-      <select id="markerCategory">
-        <option value="Dealer">💊 Dealer</option>
-        <option value="UG">🔫 UG</option>
-        <option value="Feld">🌿 Feld</option>
-        <option value="Schwarzmarkt">🕶 Schwarzmarkt</option>
-      </select>
+        <input id="markerSearch" placeholder="🔍 Marker suchen" />
 
-      <input id="markerLat" placeholder="Lat">
-      <input id="markerLng" placeholder="Lng">
+        <input id="markerName" placeholder="Name" />
+        <textarea id="markerDescription" placeholder="Beschreibung"></textarea>
 
-      <input type="file" id="markerImage">
+        <select id="markerCategory">
+          <option value="Dealer">💊 Dealer</option>
+          <option value="UG">🔫 UG</option>
+          <option value="Feld">🌿 Feld</option>
+          <option value="Schwarzmarkt">🕶 Schwarzmarkt</option>
+        </select>
 
-      <button id="saveMarker">Speichern</button>
-    </div>
+        <div class="coord-row">
+          <input id="markerLat" placeholder="Lat" />
+          <input id="markerLng" placeholder="Lng" />
+        </div>
 
-    <div class="tab-content" id="filter">
-      <h2>Filter</h2>
+        <div id="coordInfo" class="coord-info">
+          Klick auf die Map, um Koordinaten zu übernehmen.
+        </div>
 
-      <label><input type="checkbox" checked data-filter="Dealer"> Dealer</label>
-      <label><input type="checkbox" checked data-filter="UG"> UG</label>
-      <label><input type="checkbox" checked data-filter="Feld"> Feld</label>
-      <label><input type="checkbox" checked data-filter="Schwarzmarkt"> Schwarzmarkt</label>
-    </div>
+        <input type="file" id="markerImage" accept="image/*" />
 
-    <div class="tab-content" id="stats">
-      <h2>Statistik</h2>
+        <div class="button-row">
+          <button id="saveMarker">Speichern</button>
+          <button id="clearForm" class="secondary">Leeren</button>
+        </div>
+      </div>
 
-      <div id="statTotal">Marker: 0</div>
-      <div id="statDealer">Dealer: 0</div>
-      <div id="statUG">UG: 0</div>
-      <div id="statField">Felder: 0</div>
+      <div class="tab-content" id="filter">
+        <h2>Filter</h2>
+
+        <label class="check"><input type="checkbox" checked data-filter="Dealer" /> 💊 Dealer</label>
+        <label class="check"><input type="checkbox" checked data-filter="UG" /> 🔫 UG</label>
+        <label class="check"><input type="checkbox" checked data-filter="Feld" /> 🌿 Feld</label>
+        <label class="check vip-only"><input type="checkbox" checked data-filter="Schwarzmarkt" /> 🕶 Schwarzmarkt</label>
+      </div>
+
+      <div class="tab-content" id="stats">
+        <h2>Statistik</h2>
+
+        <div id="statTotal" class="stat-card">Marker: 0</div>
+        <div id="statDealer" class="stat-card">Dealer: 0</div>
+        <div id="statUG" class="stat-card">UG: 0</div>
+        <div id="statField" class="stat-card">Felder: 0</div>
+        <div id="statVip" class="stat-card vip-only">Schwarzmarkt: 0</div>
+      </div>
+
+      <div class="tab-content vip-only" id="vip">
+        <h2>VIP</h2>
+        <div class="status-box">
+          Schwarzmarkt-Marker sind nur für VIP/Admin sichtbar.
+        </div>
+      </div>
     </div>
   </div>
 
