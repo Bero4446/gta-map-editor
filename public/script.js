@@ -11,7 +11,7 @@ const bounds = [
 
 const image = L.imageOverlay("GTAV-HD-MAP-satellite.jpg", bounds).addTo(map);
 
-map.fitBounds(bounds);
+map.setView([4096,4096],-2);
 
 let markers=[];
 let markerObjects=[];
@@ -266,5 +266,6 @@ await loadMarkers();
 }
 
 init();
+
 
 
