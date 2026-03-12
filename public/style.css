@@ -106,5 +106,8 @@ button:hover
 .marker-icon{
 font-size:22px;
 }
+#panel{
+z-index:1000;
+}
 
 
