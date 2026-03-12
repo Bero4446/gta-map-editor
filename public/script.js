@@ -1,22 +1,18 @@
-const map = L.map("map", {
-  crs: L.CRS.Simple,
-  minZoom: -4,
-  maxZoom: 2
+const map = L.map("map",{
+crs:L.CRS.Simple,
+minZoom:-4,
+maxZoom:2
 });
 
-const bounds = [
-  [0, 0],
-  [8192, 8192]
-];
+const bounds=[[0,0],[8192,8192]];
 
-const image = L.imageOverlay("GTAV-HD-MAP-satellite.jpg", bounds).addTo(map);
+L.imageOverlay("GTAV-HD-MAP-satellite.jpg",bounds).addTo(map);
 
-map.setView([4096,4096],-2);
+map.fitBounds(bounds);
 
 let markers=[];
 let markerObjects=[];
 let selectedMarker=null;
-let user={loggedIn:false,isVip:false};
 
 /* ICONS */
 
@@ -26,27 +22,6 @@ UG:L.divIcon({html:"🔫",className:"marker-icon"}),
 Feld:L.divIcon({html:"🌿",className:"marker-icon"}),
 Schwarzmarkt:L.divIcon({html:"🕶",className:"marker-icon"})
 };
-
-/* USER CHECK */
-
-async function checkUser(){
-
-const res=await fetch("/api/user");
-user=await res.json();
-
-if(user.loggedIn){
-
-document.getElementById("loginStatus").innerText="👤 "+user.username;
-
-if(user.isVip){
-document.querySelectorAll(".vip-only").forEach(el=>{
-el.style.display="block";
-});
-}
-
-}
-
-}
 
 /* LOAD MARKERS */
 
@@ -60,7 +35,7 @@ updateStats();
 
 }
 
-/* RENDER */
+/* RENDER MARKERS */
 
 function renderMarkers(){
 
@@ -69,17 +44,13 @@ markerObjects=[];
 
 markers.forEach(m=>{
 
-if(m.category==="Schwarzmarkt" && !user.isVip) return;
-
 const marker=L.marker([m.lat,m.lng],{
 icon:icons||icons.Dealer,
 draggable:true
 }).addTo(map);
 
 marker.bindPopup(`<b>${m.name}</b><br>
-Kategorie: ${m.category}<br>
-Lat: ${m.lat}<br>
-Lng: ${m.lng}<br><br> <button onclick="editMarker('${m.id}')">Bearbeiten</button> <button onclick="deleteMarker('${m.id}')">Löschen</button>`);
+Kategorie: ${m.category}<br><br> <button onclick="editMarker('${m.id}')">Bearbeiten</button> <button onclick="deleteMarker('${m.id}')">Löschen</button>`);
 
 marker.on("dragend",e=>{
 
@@ -98,32 +69,46 @@ markerObjects.push(marker);
 
 }
 
-/* CLICK COORDS */
+/* MAP CLICK */
 
-map.on("click", e => {
+map.on("click",e=>{
 
-const lat = e.latlng.lat.toFixed(2);
-const lng = e.latlng.lng.toFixed(2);
+const lat=e.latlng.lat.toFixed(2);
+const lng=e.latlng.lng.toFixed(2);
 
-document.getElementById("markerLat").value = lat;
-document.getElementById("markerLng").value = lng;
+document.getElementById("markerLat").value=lat;
+document.getElementById("markerLng").value=lng;
 
 });
 
-/* EDIT MARKER */
+/* SAVE MARKER */
 
-function editMarker(id){
+document.getElementById("saveMarker").onclick=async()=>{
 
-const marker=markers.find(m=>m.id===id);
+const name=document.getElementById("markerName").value;
+const category=document.getElementById("markerCategory").value;
+const lat=parseFloat(document.getElementById("markerLat").value);
+const lng=parseFloat(document.getElementById("markerLng").value);
 
-selectedMarker=marker;
-
-document.getElementById("markerName").value=marker.name;
-document.getElementById("markerCategory").value=marker.category;
-document.getElementById("markerLat").value=marker.lat;
-document.getElementById("markerLng").value=marker.lng;
-
+if(!name||!lat||!lng){
+alert("Bitte Felder ausfüllen");
+return;
 }
+
+markers.push({
+id:Date.now().toString(),
+name,
+category,
+lat,
+lng
+});
+
+await saveMarkers();
+
+renderMarkers();
+updateStats();
+
+};
 
 /* DELETE */
 
@@ -139,7 +124,22 @@ updateStats();
 
 }
 
-/* SAVE */
+/* EDIT */
+
+function editMarker(id){
+
+const marker=markers.find(m=>m.id===id);
+
+selectedMarker=marker;
+
+document.getElementById("markerName").value=marker.name;
+document.getElementById("markerCategory").value=marker.category;
+document.getElementById("markerLat").value=marker.lat;
+document.getElementById("markerLng").value=marker.lng;
+
+}
+
+/* SAVE TO SERVER */
 
 async function saveMarkers(){
 
@@ -148,70 +148,28 @@ method:"POST",
 headers:{"Content-Type":"application/json"},
 body:JSON.stringify({
 markers,
-adminName:user.username||"Admin"
+adminName:"Admin"
 })
 });
 
 }
 
-/* SAVE BUTTON */
+/* PANEL TOGGLE */
 
-document.getElementById("saveMarker").onclick=async()=>{
+document.getElementById("panelToggle").onclick=()=>{
 
-const name=document.getElementById("markerName").value;
-const category=document.getElementById("markerCategory").value;
-const lat=parseFloat(document.getElementById("markerLat").value);
-const lng=parseFloat(document.getElementById("markerLng").value);
+const panel=document.getElementById("panel");
+const mapDiv=document.getElementById("map");
 
-if(!name||!lat||!lng){
-alert("Bitte Felder ausfüllen");
-return;
-}
+panel.classList.toggle("collapsed");
 
-if(selectedMarker){
-
-selectedMarker.name=name;
-selectedMarker.category=category;
-selectedMarker.lat=lat;
-selectedMarker.lng=lng;
-
+if(panel.classList.contains("collapsed")){
+mapDiv.style.width="100%";
 }else{
-
-markers.push({
-id:Date.now().toString(),
-name,
-category,
-lat,
-lng
-});
-
+mapDiv.style.width="calc(100% - 340px)";
 }
-
-selectedMarker=null;
-
-await saveMarkers();
-
-renderMarkers();
-updateStats();
 
 };
-
-/* STATS */
-
-function updateStats(){
-
-document.getElementById("statTotal").innerText="Marker: "+markers.length;
-
-document.getElementById("statDealer").innerText=
-"Dealer: "+markers.filter(m=>m.category==="Dealer").length;
-
-document.getElementById("statUG").innerText=
-"UG: "+markers.filter(m=>m.category==="UG").length;
-
-document.getElementById("statField").innerText=
-"Felder: "+markers.filter(m=>m.category==="Feld").length;
-
-}
 
 /* TABS */
 
@@ -229,43 +187,6 @@ document.getElementById(btn.dataset.tab).classList.add("active");
 
 });
 
-/* PANEL */
-
-document.getElementById("panelToggle").onclick=()=>{
-document.getElementById("panel").classList.toggle("collapsed");
-};
-
-/* DISCORD LOGIN */
-
-document.getElementById("discordLogin").onclick=()=>{
-window.location.href="/auth/discord";
-};
-
-/* ADMIN LOGIN */
-
-document.getElementById("adminLogin").onclick=()=>{
-
-const pw=prompt("Admin Passwort");
-
-if(pw==="admin123"){
-alert("Admin Login erfolgreich");
-}else{
-alert("Falsches Passwort");
-}
-
-};
-
 /* INIT */
 
-async function init(){
-
-await checkUser();
-await loadMarkers();
-
-}
-
-init();
-
-
-
-
+loadMarkers();
