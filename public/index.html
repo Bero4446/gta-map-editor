@@ -16,7 +16,7 @@
 
     <div class="top-actions">
       <button id="discordLogin">Discord Login</button>
-      <button id="logoutBtn" class="secondary">Logout</button>
+      <button id="logoutBtn" class="secondary hidden">Logout</button>
       <span id="loginStatus">Nicht eingeloggt</span>
     </div>
   </div>
@@ -31,19 +31,20 @@
         <button class="tab active" data-tab="editor">Editor</button>
         <button class="tab" data-tab="filter">Filter</button>
         <button class="tab" data-tab="stats">Statistik</button>
-        <button class="tab vip-only" data-tab="vip">VIP</button>
+        <button class="tab vip-only hidden" data-tab="vip">VIP</button>
       </div>
 
       <div class="tab-content active" id="editor">
         <h2>Marker Editor</h2>
 
         <div class="status-box" id="roleInfo">
-          Nicht eingeloggt
+          Discord Login nötig. Marker erstellen/bearbeiten nur mit Admin-Rolle.
         </div>
 
         <input id="markerSearch" placeholder="🔍 Marker suchen" />
 
         <input id="markerName" placeholder="Name" />
+
         <textarea id="markerDescription" placeholder="Beschreibung"></textarea>
 
         <select id="markerCategory">
@@ -73,10 +74,25 @@
       <div class="tab-content" id="filter">
         <h2>Filter</h2>
 
-        <label class="check"><input type="checkbox" checked data-filter="Dealer" /> 💊 Dealer</label>
-        <label class="check"><input type="checkbox" checked data-filter="UG" /> 🔫 UG</label>
-        <label class="check"><input type="checkbox" checked data-filter="Feld" /> 🌿 Feld</label>
-        <label class="check vip-only"><input type="checkbox" checked data-filter="Schwarzmarkt" /> 🕶 Schwarzmarkt</label>
+        <label class="check">
+          <input type="checkbox" checked data-filter="Dealer" />
+          💊 Dealer
+        </label>
+
+        <label class="check">
+          <input type="checkbox" checked data-filter="UG" />
+          🔫 UG
+        </label>
+
+        <label class="check">
+          <input type="checkbox" checked data-filter="Feld" />
+          🌿 Feld
+        </label>
+
+        <label class="check vip-only hidden">
+          <input type="checkbox" checked data-filter="Schwarzmarkt" />
+          🕶 Schwarzmarkt
+        </label>
       </div>
 
       <div class="tab-content" id="stats">
@@ -86,10 +102,10 @@
         <div id="statDealer" class="stat-card">Dealer: 0</div>
         <div id="statUG" class="stat-card">UG: 0</div>
         <div id="statField" class="stat-card">Felder: 0</div>
-        <div id="statVip" class="stat-card vip-only">Schwarzmarkt: 0</div>
+        <div id="statVip" class="stat-card vip-only hidden">Schwarzmarkt: 0</div>
       </div>
 
-      <div class="tab-content vip-only" id="vip">
+      <div class="tab-content vip-only hidden" id="vip">
         <h2>VIP</h2>
         <div class="status-box">
           Schwarzmarkt-Marker sind nur für VIP/Admin sichtbar.
