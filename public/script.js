@@ -473,3 +473,25 @@ categoryCheckboxes.forEach(cb => {
 updateAdminStatus();
 clearForm();
 loadMarkers();
+async function checkUser() {
+
+  const res = await fetch("/api/user");
+  const data = await res.json();
+
+  if (data.loggedIn) {
+
+    console.log("Eingeloggt als:", data.username);
+
+    if (data.isVip) {
+      document.getElementById("schwarzmarktTab").style.display = "block";
+    }
+
+  }
+
+}
+
+checkUser();
+
+document.getElementById("discordLogin").onclick = () => {
+  window.location.href = "/auth/discord";
+};
