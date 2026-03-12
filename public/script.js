@@ -35,8 +35,21 @@ const icons = {
 
 function createEmojiIcon(emoji) {
   return L.divIcon({
-    className: "emoji-div-icon",
-    html: `<div class="emoji-marker">${emoji}</div>`,
+    className: "",
+    html: `
+      <div style="
+        width: 34px;
+        height: 34px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 28px;
+        line-height: 34px;
+        text-shadow: 0 2px 8px rgba(0,0,0,0.85);
+      ">
+        ${emoji}
+      </div>
+    `,
     iconSize: [34, 34],
     iconAnchor: [17, 17],
     popupAnchor: [0, -14],
@@ -180,7 +193,7 @@ function renderMarkers() {
   markers.forEach((marker) => {
     if (!shouldShowMarker(marker)) return;
 
-    const layer = L.marker([marker.lat, marker.lng], {
+    const layer = L.marker([Number(marker.lat), Number(marker.lng)], {
       icon: icons[marker.category] || icons.Dealer,
       draggable: !!currentUser.isAdmin,
       title: marker.name
