@@ -7,6 +7,16 @@ const axios = require("axios");
 const multer = require("multer");
 
 const app = express();
+
+app.use(session({
+  secret: process.env.SESSION_SECRET,
+  resave: false,
+  saveUninitialized: false
+}));
+
+app.use(passport.initialize());
+app.use(passport.session());
+
 const PORT = process.env.PORT || 3000;
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL || "";
 
@@ -130,4 +140,5 @@ app.post("/upload", upload.single("file"), (req, res) => {
 app.listen(PORT, () => {
   console.log("Server läuft auf Port " + PORT);
 });
+
 
