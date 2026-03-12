@@ -35,11 +35,9 @@
         <label for="markerCategory">Kategorie</label>
         <select id="markerCategory">
           <option value="dealer">Dealer</option>
-          <option value="vagos">Vagos</option>
-          <option value="normal">Normal</option>
-          <option value="police">Police</option>
-          <option value="ballas">Ballas</option>
-          <option value="grove">Grove</option>
+          <option value="felder">Felder</option>
+          <option value="fraktionen">Fraktionen</option>
+          <option value="ugs">Ugs</option>
         </select>
 
         <label>Position</label>
@@ -69,19 +67,32 @@
       </div>
 
       <div class="panel">
+        <h2>Filter</h2>
+
+        <div class="checkbox-group">
+          <label><input type="checkbox" class="categoryCheckbox" value="felder" checked> Felder</label>
+          <label><input type="checkbox" class="categoryCheckbox" value="dealer" checked> Dealer</label>
+          <label><input type="checkbox" class="categoryCheckbox" value="fraktionen" checked> Fraktionen</label>
+          <label><input type="checkbox" class="categoryCheckbox" value="ugs" checked> Ugs</label>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Statistik</h2>
+
+        <div class="stats-box">
+          <div>Marker gesamt: <span id="statTotal">0</span></div>
+          <div>Dealer: <span id="statDealer">0</span></div>
+          <div>Fraktionen: <span id="statFraktionen">0</span></div>
+          <div>Ugs: <span id="statUgs">0</span></div>
+          <div>Felder: <span id="statFelder">0</span></div>
+        </div>
+      </div>
+
+      <div class="panel">
         <h2>Marker-Liste</h2>
 
         <input type="text" id="searchInput" placeholder="Marker suchen..." />
-
-        <select id="filterCategory">
-          <option value="all">Alle Kategorien</option>
-          <option value="dealer">Dealer</option>
-          <option value="vagos">Vagos</option>
-          <option value="normal">Normal</option>
-          <option value="police">Police</option>
-          <option value="ballas">Ballas</option>
-          <option value="grove">Grove</option>
-        </select>
 
         <div id="markerList" class="marker-list"></div>
       </div>
