@@ -10,14 +10,26 @@ const multer = require("multer");
 const app = express();
 
 const PORT = process.env.PORT || 3000;
-const MARKERS_FILE = path.join(__dirname, "markers.json");
 const PUBLIC_DIR = path.join(__dirname, "public");
 const SCREENSHOT_DIR = path.join(PUBLIC_DIR, "screenshots");
+const MARKERS_FILE = path.join(__dirname, "markers.json");
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL || "";
 
-if (!fs.existsSync(PUBLIC_DIR)) fs.mkdirSync(PUBLIC_DIR, { recursive: true });
-if (!fs.existsSync(SCREENSHOT_DIR)) fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
-if (!fs.existsSync(MARKERS_FILE)) fs.writeFileSync(MARKERS_FILE, "[]", "utf8");
+/* -------------------- Ordner / Dateien sicherstellen -------------------- */
+
+if (!fs.existsSync(PUBLIC_DIR)) {
+  fs.mkdirSync(PUBLIC_DIR, { recursive: true });
+}
+
+if (!fs.existsSync(SCREENSHOT_DIR)) {
+  fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
+}
+
+if (!fs.existsSync(MARKERS_FILE)) {
+  fs.writeFileSync(MARKERS_FILE, "[]", "utf8");
+}
+
+/* -------------------- Basis Middleware -------------------- */
 
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
@@ -25,7 +37,7 @@ app.use(express.static(PUBLIC_DIR));
 
 app.use(
   session({
-    secret: process.env.SESSION_SECRET || "change-me",
+    secret: process.env.SESSION_SECRET || "change-me-please",
     resave: false,
     saveUninitialized: false,
     cookie: {
@@ -35,11 +47,18 @@ app.use(
   })
 );
 
+/* -------------------- Passport / Discord -------------------- */
+
 app.use(passport.initialize());
 app.use(passport.session());
 
-passport.serializeUser((user, done) => done(null, user));
-passport.deserializeUser((obj, done) => done(null, obj));
+passport.serializeUser((user, done) => {
+  done(null, user);
+});
+
+passport.deserializeUser((obj, done) => {
+  done(null, obj);
+});
 
 passport.use(
   new DiscordStrategy(
@@ -69,8 +88,14 @@ passport.use(
           );
 
           const roles = Array.isArray(response.data.roles) ? response.data.roles : [];
-          isVip = !!vipRoleId && roles.includes(vipRoleId);
-          isAdmin = !!adminRoleId && roles.includes(adminRoleId);
+
+          if (vipRoleId) {
+            isVip = roles.includes(vipRoleId);
+          }
+
+          if (adminRoleId) {
+            isAdmin = roles.includes(adminRoleId);
+          }
         }
 
         profile.isVip = isVip;
@@ -79,16 +104,22 @@ passport.use(
         return done(null, profile);
       } catch (error) {
         console.error("Discord Rollenfehler:", error.response?.data || error.message);
+
         profile.isVip = false;
         profile.isAdmin = false;
+
         return done(null, profile);
       }
     }
   )
 );
 
+/* -------------------- Upload -------------------- */
+
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, SCREENSHOT_DIR),
+  destination: (req, file, cb) => {
+    cb(null, SCREENSHOT_DIR);
+  },
   filename: (req, file, cb) => {
     const ext = path.extname(file.originalname || "").toLowerCase() || ".jpg";
     cb(null, `${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`);
@@ -96,6 +127,8 @@ const storage = multer.diskStorage({
 });
 
 const upload = multer({ storage });
+
+/* -------------------- Marker Helpers -------------------- */
 
 function normalizeMarker(marker) {
   if (!marker || typeof marker !== "object") return null;
@@ -109,6 +142,7 @@ function normalizeMarker(marker) {
       lng = Number(marker.pos[1]);
     } else if (
       typeof marker.pos === "object" &&
+      marker.pos !== null &&
       typeof marker.pos.lat !== "undefined" &&
       typeof marker.pos.lng !== "undefined"
     ) {
@@ -137,7 +171,11 @@ function loadMarkers() {
   try {
     const raw = fs.readFileSync(MARKERS_FILE, "utf8");
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
+
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
     return parsed.map(normalizeMarker).filter(Boolean);
   } catch (error) {
     console.error("Fehler beim Laden von markers.json:", error.message);
@@ -146,30 +184,33 @@ function loadMarkers() {
 }
 
 function saveMarkers(markers) {
-  const clean = markers.map(normalizeMarker).filter(Boolean);
-  fs.writeFileSync(MARKERS_FILE, JSON.stringify(clean, null, 2), "utf8");
-  return clean;
+  const cleanMarkers = markers.map(normalizeMarker).filter(Boolean);
+  fs.writeFileSync(MARKERS_FILE, JSON.stringify(cleanMarkers, null, 2), "utf8");
+  return cleanMarkers;
 }
 
-function hasMarkerChanged(a, b) {
+function hasMarkerChanged(oldMarker, newMarker) {
   return (
-    a.name !== b.name ||
-    a.description !== b.description ||
-    a.category !== b.category ||
-    a.lat !== b.lat ||
-    a.lng !== b.lng ||
-    (a.image || "") !== (b.image || "")
+    oldMarker.name !== newMarker.name ||
+    oldMarker.description !== newMarker.description ||
+    oldMarker.category !== newMarker.category ||
+    oldMarker.lat !== newMarker.lat ||
+    oldMarker.lng !== newMarker.lng ||
+    (oldMarker.image || "") !== (newMarker.image || "")
   );
 }
 
 async function sendDiscordLog(content) {
   if (!DISCORD_WEBHOOK_URL) return;
+
   try {
     await axios.post(DISCORD_WEBHOOK_URL, { content });
   } catch (error) {
     console.error("Discord Webhook Fehler:", error.response?.data || error.message);
   }
 }
+
+/* -------------------- Auth Routes -------------------- */
 
 app.get("/auth/discord", passport.authenticate("discord"));
 
@@ -189,6 +230,8 @@ app.get("/logout", (req, res) => {
   });
 });
 
+/* -------------------- API User -------------------- */
+
 app.get("/api/user", (req, res) => {
   if (!req.user) {
     return res.json({
@@ -206,6 +249,8 @@ app.get("/api/user", (req, res) => {
     isAdmin: !!req.user.isAdmin
   });
 });
+
+/* -------------------- Marker Routes -------------------- */
 
 app.get("/markers", (req, res) => {
   res.json(loadMarkers());
@@ -246,12 +291,20 @@ app.post("/markers", async (req, res) => {
     );
   }
 
-  res.json({ success: true, markers: newMarkers });
+  res.json({
+    success: true,
+    markers: newMarkers
+  });
 });
+
+/* -------------------- Screenshot Upload -------------------- */
 
 app.post("/upload", upload.single("file"), (req, res) => {
   if (!req.file) {
-    return res.status(400).json({ error: "Keine Datei hochgeladen" });
+    return res.status(400).json({
+      success: false,
+      error: "Keine Datei hochgeladen"
+    });
   }
 
   res.json({
@@ -260,6 +313,8 @@ app.post("/upload", upload.single("file"), (req, res) => {
     path: `screenshots/${req.file.filename}`
   });
 });
+
+/* -------------------- Start -------------------- */
 
 app.listen(PORT, () => {
   console.log(`Server läuft auf Port ${PORT}`);
