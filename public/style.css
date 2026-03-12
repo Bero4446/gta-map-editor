@@ -223,3 +223,26 @@ body {
     border-top: 1px solid #2b2b2b;
   }
 }
+.checkbox-group {
+  display: grid;
+  gap: 8px;
+}
+
+.checkbox-group label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #ddd;
+  font-size: 14px;
+}
+
+.stats-box {
+  display: grid;
+  gap: 8px;
+  background: #101010;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 10px;
+  color: #ddd;
+  font-size: 14px;
+}
