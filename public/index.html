@@ -1,131 +1,149 @@
 <!DOCTYPE html>
 <html lang="de">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>GTA Map Editor</title>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
-  <link rel="stylesheet" href="style.css" />
+<meta charset="UTF-8">
+<title>GTA RP Map</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+<link rel="stylesheet" href="style.css"/>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 </head>
+
 <body>
-  <header class="topbar">
-    <div class="topbar-left">
-      <h1>GTA 5 Map Editor</h1>
-      <div class="topbar-controls">
-        <button id="adminLoginBtn" type="button">Admin Login</button>
-        <span id="adminStatus">Nicht eingeloggt</span>
-      </div>
-    </div>
-  </header>
-<button id="discordLogin">Discord Login</button>
-  <main class="app-layout">
-    <section class="map-section">
-      <div id="map"></div>
-    </section>
 
-    <aside class="sidebar">
-      <div class="panel">
-        <h2>Marker bearbeiten</h2>
+<div class="topbar">
 
-        <input type="hidden" id="markerId" />
-
-        <label for="markerName">Name</label>
-        <input type="text" id="markerName" placeholder="Ort eingeben..." />
-
-        <label for="markerCategory">Kategorie</label>
-        <select id="markerCategory">
-          <option value="dealer">Dealer</option>
-          <option value="felder">Felder</option>
-          <option value="ugs">Ugs</option>
-          <option value="yakuza">Yakuza</option>
-          <option value="lcn">LCN</option>
-          <option value="ica">ICA</option>
-          <option value="triaden">Triaden</option>
-          <option value="sinaloa">Sinaloa</option>
-          <option value="lsv">LSV</option>
-          <option value="mg13">MG13</option>
-          <option value="ballas">Ballas</option>
-          <option value="midnight">Midnight</option>
-          <option value="grove">Grove</option>
-          <option value="rednecks">Rednecks</option>
-          <option value="52c">52c</option>
-          <option value="atlas">Atlas</option>
-          <option value="lostmc">Lost MC</option>
-          <option value="adalet">Adalet</option>
-          <option value="hoh">HOH</option>
-        </select>
-
-        <label>Position</label>
-        <div class="coords-box">
-          <div>Lat: <span id="markerLat">-</span></div>
-          <div>Lng: <span id="markerLng">-</span></div>
-        </div>
-
-        <label for="markerScreenshot">Screenshot</label>
-        <input type="file" id="markerScreenshot" accept="image/*" />
-
-        <div class="preview-wrap">
-          <img id="screenshotPreview" alt="Screenshot Vorschau" />
-          <div id="noPreview">Kein Screenshot ausgewählt</div>
-        </div>
-
-        <div class="button-row">
-          <button id="saveMarkerBtn" type="button">Speichern</button>
-          <button id="updateMarkerBtn" type="button">Aktualisieren</button>
-          <button id="deleteMarkerBtn" type="button">Löschen</button>
-          <button id="resetFormBtn" type="button">Neu</button>
-        </div>
-
-        <p class="info-text">
-          Als Admin: Auf freie Stelle der Karte klicken, dann rechts Name/Kategorie eintragen und auf Speichern drücken.
-        </p>
-      </div>
-
-      <div class="panel">
-        <h2>Filter</h2>
-
-        <div class="checkbox-group">
-          <label><input type="checkbox" class="categoryCheckbox" value="felder" checked> Felder</label>
-          <label><input type="checkbox" class="categoryCheckbox" value="dealer" checked> Dealer</label>
-          <label><input type="checkbox" class="categoryCheckbox" value="ugs" checked> Ugs</label>
-          <label><input type="checkbox" class="categoryCheckbox" value="yakuza" checked> Yakuza</label>
-          <label><input type="checkbox" class="categoryCheckbox" value="lcn" checked> LCN</label>
-          <label><input type="checkbox" class="categoryCheckbox" value="ica" checked> ICA</label>
-          <label><input type="checkbox" class="categoryCheckbox" value="triaden" checked> Triaden</label>
-          <label><input type="checkbox" class="categoryCheckbox" value="sinaloa" checked> Sinaloa</label>
-          <label><input type="checkbox" class="categoryCheckbox" value="lsv" checked> LSV</label>
-          <label><input type="checkbox" class="categoryCheckbox" value="mg13" checked> MG13</label>
-          <label><input type="checkbox" class="categoryCheckbox" value="ballas" checked> Ballas</label>
-          <label><input type="checkbox" class="categoryCheckbox" value="midnight" checked> Midnight</label>
-          <label><input type="checkbox" class="categoryCheckbox" value="grove" checked> Grove</label>
-          <label><input type="checkbox" class="categoryCheckbox" value="rednecks" checked> Rednecks</label>
-          <label><input type="checkbox" class="categoryCheckbox" value="52c" checked> 52c</label>
-          <label><input type="checkbox" class="categoryCheckbox" value="atlas" checked> Atlas</label>
-          <label><input type="checkbox" class="categoryCheckbox" value="lostmc" checked> Lost MC</label>
-          <label><input type="checkbox" class="categoryCheckbox" value="adalet" checked> Adalet</label>
-          <label><input type="checkbox" class="categoryCheckbox" value="hoh" checked> HOH</label>
-        </div>
-      </div>
-
-      <div class="panel">
-        <h2>Statistik</h2>
-        <div id="statsBox" class="stats-box"></div>
-      </div>
-
-      <div class="panel">
-        <h2>Marker-Liste</h2>
-        <input type="text" id="searchInput" placeholder="Marker suchen..." />
-        <div id="markerList" class="marker-list"></div>
-      </div>
-    </aside>
-  </main>
-
-  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-  <script src="script.js"></script>
-</body>
-</html>
-<div id="schwarzmarktTab" style="display:none;">
-  <h2>Schwarzmarkt</h2>
-  <p>Nur VIP Zugriff</p>
+<div class="logo">
+GTA RP MAP
 </div>
 
+<div class="top-actions">
+
+<button id="discordLogin">Discord Login</button>
+<button id="adminLogin">Admin Login</button>
+
+<span id="loginStatus">
+Nicht eingeloggt
+</span>
+
+</div>
+
+</div>
+
+<div id="map"></div>
+
+<div id="panel">
+
+<div id="panelToggle">
+☰
+</div>
+
+<div class="tabs">
+
+<button class="tab active" data-tab="editor">
+Editor
+</button>
+
+<button class="tab" data-tab="filter">
+Filter
+</button>
+
+<button class="tab" data-tab="stats">
+Statistik
+</button>
+
+<button class="tab vip-only" data-tab="vip">
+Schwarzmarkt
+</button>
+
+</div>
+
+<div class="tab-content active" id="editor">
+
+<h2>Marker Editor</h2>
+
+<input id="markerName" placeholder="Name">
+
+<select id="markerCategory">
+
+<option value="Dealer">Dealer</option>
+<option value="Fraktion">Fraktion</option>
+<option value="UG">UG</option>
+<option value="Feld">Feld</option>
+
+</select>
+
+<input id="markerLat" placeholder="Lat">
+<input id="markerLng" placeholder="Lng">
+
+<input type="file" id="screenshot">
+
+<button id="saveMarker">
+Speichern
+</button>
+
+</div>
+
+<div class="tab-content" id="filter">
+
+<h2>Filter</h2>
+
+<label>
+<input type="checkbox" checked data-filter="Dealer">
+Dealer
+</label>
+
+<label>
+<input type="checkbox" checked data-filter="Fraktion">
+Fraktionen
+</label>
+
+<label>
+<input type="checkbox" checked data-filter="UG">
+UGs
+</label>
+
+<label>
+<input type="checkbox" checked data-filter="Feld">
+Felder
+</label>
+
+</div>
+
+<div class="tab-content" id="stats">
+
+<h2>Statistik</h2>
+
+<div id="statTotal">
+Marker gesamt: 0
+</div>
+
+<div id="statDealer">
+Dealer: 0
+</div>
+
+<div id="statFaction">
+Fraktionen: 0
+</div>
+
+<div id="statUG">
+UGs: 0
+</div>
+
+</div>
+
+<div class="tab-content vip-only" id="vip">
+
+<h2>Schwarzmarkt</h2>
+
+<p>Nur Discord VIP Zugriff</p>
+
+</div>
+
+</div>
+
+<script src="script.js"></script>
+
+</body>
+</html>
