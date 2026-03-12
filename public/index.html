@@ -1,101 +1,78 @@
 <!DOCTYPE html>
-
 <html lang="de">
 <head>
+  <meta charset="UTF-8">
+  <title>GTA RP Map</title>
 
-<meta charset="UTF-8">
-<title>GTA RP Map</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+  <link rel="stylesheet" href="style.css"/>
 
-<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
-<link rel="stylesheet" href="style.css"/>
-
-<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
-
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 </head>
-
 <body>
 
-<div class="topbar">
+  <div class="topbar">
+    <div class="logo">GTA RP MAP</div>
 
-<div class="logo">
-GTA RP MAP
-</div>
+    <div class="top-actions">
+      <button id="discordLogin">Discord Login</button>
+      <button id="adminLogin">Admin Login</button>
+      <span id="loginStatus">Nicht eingeloggt</span>
+    </div>
+  </div>
 
-<div class="top-actions">
+  <div id="map"></div>
 
-<button id="discordLogin">Discord Login</button> <button id="adminLogin">Admin Login</button>
+  <div id="panel">
+    <div id="panelToggle">☰</div>
 
-<span id="loginStatus">
-Nicht eingeloggt
-</span>
+    <div class="tabs">
+      <button class="tab active" data-tab="editor">Editor</button>
+      <button class="tab" data-tab="filter">Filter</button>
+      <button class="tab" data-tab="stats">Statistik</button>
+    </div>
 
-</div>
+    <div class="tab-content active" id="editor">
+      <h2>Marker Editor</h2>
 
-</div>
+      <input id="markerSearch" placeholder="🔍 Marker suchen">
+      <input id="markerName" placeholder="Name">
+      <input id="markerDescription" placeholder="Beschreibung">
 
-<div id="map"></div>
+      <select id="markerCategory">
+        <option value="Dealer">💊 Dealer</option>
+        <option value="UG">🔫 UG</option>
+        <option value="Feld">🌿 Feld</option>
+        <option value="Schwarzmarkt">🕶 Schwarzmarkt</option>
+      </select>
 
-<div id="panel">
+      <input id="markerLat" placeholder="Lat">
+      <input id="markerLng" placeholder="Lng">
 
-<div id="panelToggle">☰</div>
+      <input type="file" id="markerImage">
 
-<div class="tabs">
+      <button id="saveMarker">Speichern</button>
+    </div>
 
-<button class="tab active" data-tab="editor">Editor</button> <button class="tab" data-tab="filter">Filter</button> <button class="tab" data-tab="stats">Statistik</button> <button class="tab vip-only" data-tab="vip">Schwarzmarkt</button>
+    <div class="tab-content" id="filter">
+      <h2>Filter</h2>
 
-</div>
+      <label><input type="checkbox" checked data-filter="Dealer"> Dealer</label>
+      <label><input type="checkbox" checked data-filter="UG"> UG</label>
+      <label><input type="checkbox" checked data-filter="Feld"> Feld</label>
+      <label><input type="checkbox" checked data-filter="Schwarzmarkt"> Schwarzmarkt</label>
+    </div>
 
-<div class="tab-content active" id="editor">
+    <div class="tab-content" id="stats">
+      <h2>Statistik</h2>
 
-<h2>Marker Editor</h2>
+      <div id="statTotal">Marker: 0</div>
+      <div id="statDealer">Dealer: 0</div>
+      <div id="statUG">UG: 0</div>
+      <div id="statField">Felder: 0</div>
+    </div>
+  </div>
 
-<input id="markerName" placeholder="Name">
-
-<select id="markerCategory">
-
-<option value="Dealer">💊 Dealer</option>
-<option value="UG">🔫 UG</option>
-<option value="Feld">🌿 Feld</option>
-<option value="Schwarzmarkt">🕶 Schwarzmarkt</option>
-
-</select>
-
-<input id="markerLat" placeholder="Lat">
-<input id="markerLng" placeholder="Lng">
-
-<button id="saveMarker">Speichern</button>
-
-</div>
-
-<div class="tab-content" id="filter">
-
-<h2>Filter</h2>
-
-<label><input type="checkbox" checked data-filter="Dealer"> 💊 Dealer</label> <label><input type="checkbox" checked data-filter="UG"> 🔫 UG</label> <label><input type="checkbox" checked data-filter="Feld"> 🌿 Feld</label>
-
-</div>
-
-<div class="tab-content" id="stats">
-
-<h2>Statistik</h2>
-
-<div id="statTotal"></div>
-<div id="statDealer"></div>
-<div id="statUG"></div>
-<div id="statField"></div>
-
-</div>
-
-<div class="tab-content vip-only" id="vip">
-
-<h2>Schwarzmarkt</h2>
-<p>Nur für Discord VIP sichtbar</p>
-
-</div>
-
-</div>
-
-<script src="script.js"></script>
-
+  <script src="script.js"></script>
 </body>
 </html>
