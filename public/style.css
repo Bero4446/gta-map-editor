@@ -1,23 +1,27 @@
 body{
 margin:0;
-font-family:Arial;
+font-family:Segoe UI, Arial, sans-serif;
 background:#0f0f0f;
-color:white;
+color:#fff;
 }
 
 .topbar{
 height:60px;
-background:#1b1b1b;
+background:#151515;
 display:flex;
 align-items:center;
 justify-content:space-between;
 padding:0 20px;
-border-bottom:1px solid #333;
+border-bottom:1px solid #2a2a2a;
 }
 
 .logo{
 font-size:20px;
-font-weight:bold;
+font-weight:600;
+}
+
+.top-actions button{
+margin-left:8px;
 }
 
 #map{
@@ -28,43 +32,45 @@ height:calc(100vh - 60px);
 position:absolute;
 right:0;
 top:60px;
-width:320px;
-background:#1b1b1b;
+width:340px;
+background:#171717;
 height:calc(100vh - 60px);
-border-left:1px solid #333;
-padding:15px;
-overflow:auto;
-}
-
-#panel.collapsed{
-right:-300px;
+border-left:1px solid #2a2a2a;
+padding:16px;
+overflow-y:auto;
+box-shadow:-5px 0 20px rgba(0,0,0,0.4);
 }
 
 #panelToggle{
 position:absolute;
-left:-35px;
+left:-36px;
 top:20px;
-background:#1b1b1b;
-padding:6px;
+background:#171717;
+border:1px solid #2a2a2a;
+padding:6px 10px;
 cursor:pointer;
+border-radius:6px 0 0 6px;
 }
 
 .tabs{
 display:flex;
-gap:5px;
-margin-bottom:10px;
+gap:6px;
+margin-bottom:14px;
 }
 
 .tab{
-background:#2a2a2a;
+background:#222;
 border:none;
-color:white;
+color:#ddd;
 padding:6px 10px;
+border-radius:6px;
 cursor:pointer;
+font-size:13px;
 }
 
 .tab.active{
-background:#5865f2;
+background:#5865F2;
+color:#fff;
 }
 
 .tab-content{
@@ -78,20 +84,24 @@ display:block;
 input,select{
 width:100%;
 margin-bottom:10px;
-padding:6px;
-background:#2a2a2a;
-border:none;
-color:white;
+padding:8px;
+background:#222;
+border:1px solid #333;
+color:#fff;
+border-radius:6px;
 }
 
 button{
-background:#5865f2;
+background:#5865F2;
 border:none;
-color:white;
+color:#fff;
 padding:8px;
+border-radius:6px;
 cursor:pointer;
 }
 
+button:hover
+
 .marker-icon{
-font-size:22px;
+font-size:20px;
 }
