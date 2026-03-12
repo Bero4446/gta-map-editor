@@ -17,12 +17,22 @@ function loadMarkers() {
     fs.writeFileSync(MARKERS_FILE, "[]");
   }
 
-  const data = fs.readFileSync(MARKERS_FILE);
+  const data = fs.readFileSync(MARKERS_FILE, "utf8");
   return JSON.parse(data);
 }
 
 function saveMarkers(markers) {
   fs.writeFileSync(MARKERS_FILE, JSON.stringify(markers, null, 2));
+}
+
+function posToText(pos) {
+  if (Array.isArray(pos) && pos.length === 2) {
+    return `${pos[0].toFixed(2)}, ${pos[1].toFixed(2)}`;
+  }
+  if (pos && typeof pos.lat === "number" && typeof pos.lng === "number") {
+    return `${pos.lat.toFixed(2)}, ${pos.lng.toFixed(2)}`;
+  }
+  return "unbekannt";
 }
 
 async function sendDiscordLog(content) {
@@ -47,25 +57,62 @@ app.get("/markers", (req, res) => {
 
 app.post("/markers", async (req, res) => {
   const oldMarkers = loadMarkers();
-  const newMarkers = req.body;
+  const newMarkers = req.body.markers || [];
+  const adminName = req.body.adminName || "Unbekannt";
 
   saveMarkers(newMarkers);
 
-  const oldIds = new Set(oldMarkers.map(m => m.id));
-  const newIds = new Set(newMarkers.map(m => m.id));
+  const oldMap = new Map(oldMarkers.map(m => [m.id, m]));
+  const newMap = new Map(newMarkers.map(m => [m.id, m]));
 
-  const added = newMarkers.filter(m => !oldIds.has(m.id));
-  const removed = oldMarkers.filter(m => !newIds.has(m.id));
+  const added = newMarkers.filter(m => !oldMap.has(m.id));
+  const removed = oldMarkers.filter(m => !newMap.has(m.id));
+
+  const edited = [];
+  const moved = [];
+
+  for (const newMarker of newMarkers) {
+    const oldMarker = oldMap.get(newMarker.id);
+    if (!oldMarker) continue;
+
+    const oldPos = JSON.stringify(oldMarker.pos);
+    const newPos = JSON.stringify(newMarker.pos);
+
+    const changedName = oldMarker.name !== newMarker.name;
+    const changedCategory = oldMarker.category !== newMarker.category;
+    const changedScreenshot = (oldMarker.screenshot || "") !== (newMarker.screenshot || "");
+    const changedPosition = oldPos !== newPos;
+
+    if (changedName || changedCategory || changedScreenshot) {
+      edited.push({ oldMarker, newMarker });
+    }
+
+    if (changedPosition) {
+      moved.push({ oldMarker, newMarker });
+    }
+  }
 
   for (const marker of added) {
     await sendDiscordLog(
-      `🟢 Marker erstellt: **${marker.name}** | Kategorie: **${marker.category}**`
+      `🟢 **${adminName}** hat Marker erstellt: **${marker.name}** | Kategorie: **${marker.category}** | Position: **${posToText(marker.pos)}**`
     );
   }
 
   for (const marker of removed) {
     await sendDiscordLog(
-      `🔴 Marker gelöscht: **${marker.name}** | Kategorie: **${marker.category}**`
+      `🔴 **${adminName}** hat Marker gelöscht: **${marker.name}** | Kategorie: **${marker.category}**`
+    );
+  }
+
+  for (const item of edited) {
+    await sendDiscordLog(
+      `🟡 **${adminName}** hat Marker bearbeitet: **${item.oldMarker.name}** → **${item.newMarker.name}** | Kategorie: **${item.oldMarker.category}** → **${item.newMarker.category}**`
+    );
+  }
+
+  for (const item of moved) {
+    await sendDiscordLog(
+      `🔵 **${adminName}** hat Marker verschoben: **${item.newMarker.name}** | Von: **${posToText(item.oldMarker.pos)}** | Nach: **${posToText(item.newMarker.pos)}**`
     );
   }
 
