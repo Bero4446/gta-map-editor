@@ -100,14 +100,13 @@ markerObjects.push(marker);
 
 /* CLICK COORDS */
 
-map.on("click",e=>{
+map.on("click", e => {
 
-document.getElementById("markerLat").value=e.latlng.lat.toFixed(2);
-document.getElementById("markerLng").value=e.latlng.lng.toFixed(2);
+const lat = e.latlng.lat.toFixed(2);
+const lng = e.latlng.lng.toFixed(2);
 
-alert(
-"Koordinaten:\n\nLat: "+e.latlng.lat.toFixed(2)+"\nLng: "+e.latlng.lng.toFixed(2)
-);
+document.getElementById("markerLat").value = lat;
+document.getElementById("markerLng").value = lng;
 
 });
 
@@ -266,6 +265,7 @@ await loadMarkers();
 }
 
 init();
+
 
 
 
