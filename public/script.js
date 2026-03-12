@@ -8,12 +8,14 @@ const bounds=[[0,0],[8192,8192]];
 
 L.imageOverlay("GTAV-HD-MAP-satellite.jpg",bounds).addTo(map);
 
-map.fitBounds(bounds);
+/* MAP START ZENTRIERT */
+
+map.setView([4096,4096],-2);
 
 let markers=[];
 let markerObjects=[];
 
-/* MARKER ICONS */
+/* ICONS */
 
 const icons={
 Dealer:L.divIcon({html:"💊",className:"marker-icon"}),
@@ -49,15 +51,24 @@ draggable:true,
 title:m.name
 }).addTo(map);
 
+/* HOVER TOOLTIP */
+
+marker.bindTooltip(m.name,{
+direction:"top"
+});
+
+/* POPUP */
+
 marker.bindPopup(` <b>${m.name}</b><br>
+${m.description||""}<br>
 Kategorie: ${m.category}<br>
-Lat: ${m.lat}<br>
-Lng: ${m.lng}<br>
 
 ${m.image ? `<img src="${m.image}" style="width:200px;margin-top:5px;">` : ""}
 
 <br><br> <button onclick="deleteMarker('${m.id}')">Löschen</button>
 `);
+
+/* DRAG */
 
 marker.on("dragend",e=>{
 
@@ -93,11 +104,13 @@ document.getElementById("markerLng").value=lng;
 document.getElementById("saveMarker").onclick=async()=>{
 
 const name=document.getElementById("markerName").value;
+const description=document.getElementById("markerDescription").value;
 const category=document.getElementById("markerCategory").value;
+
 const lat=parseFloat(document.getElementById("markerLat").value);
 const lng=parseFloat(document.getElementById("markerLng").value);
 
-const file=document.getElementById("markerImage")?.files[0];
+const file=document.getElementById("markerImage").files[0];
 
 let image="";
 
@@ -105,16 +118,15 @@ if(file){
 image=URL.createObjectURL(file);
 }
 
-const newMarker={
+markers.push({
 id:Date.now().toString(),
 name,
+description,
 category,
 lat,
 lng,
 image
-};
-
-markers.push(newMarker);
+});
 
 await saveMarkers();
 
@@ -123,7 +135,7 @@ updateStats();
 
 };
 
-/* DELETE MARKER */
+/* DELETE */
 
 function deleteMarker(id){
 
@@ -137,7 +149,7 @@ updateStats();
 
 }
 
-/* SAVE TO SERVER */
+/* SAVE */
 
 async function saveMarkers(){
 
@@ -152,9 +164,9 @@ adminName:"Admin"
 
 }
 
-/* MARKER SEARCH */
+/* SEARCH */
 
-document.getElementById("markerSearch")?.addEventListener("input",function(){
+document.getElementById("markerSearch").addEventListener("input",function(){
 
 const search=this.value.toLowerCase();
 
@@ -179,4 +191,44 @@ document.getElementById("panelToggle").onclick=()=>{
 const panel=document.getElementById("panel");
 const mapDiv=document.getElementById("map");
 
-panel.classList.to
+panel.classList.toggle("collapsed");
+
+if(panel.classList.contains("collapsed")){
+mapDiv.style.width="100%";
+}else{
+mapDiv.style.width="calc(100% - 340px)";
+}
+
+};
+
+/* DISCORD LOGIN FIX */
+
+document.getElementById("discordLogin").onclick=()=>{
+window.location.href="/auth/discord";
+};
+
+document.getElementById("adminLogin").onclick=()=>{
+window.location.href="/auth/discord";
+};
+
+/* STATS */
+
+function updateStats(){
+
+document.getElementById("statTotal").innerText=
+"Marker: "+markers.length;
+
+document.getElementById("statDealer").innerText=
+"Dealer: "+markers.filter(m=>m.category==="Dealer").length;
+
+document.getElementById("statUG").innerText=
+"UG: "+markers.filter(m=>m.category==="UG").length;
+
+document.getElementById("statField").innerText=
+"Felder: "+markers.filter(m=>m.category==="Feld").length;
+
+}
+
+/* INIT */
+
+loadMarkers();
