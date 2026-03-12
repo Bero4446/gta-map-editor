@@ -25,8 +25,15 @@ const deleteMarkerBtn = document.getElementById("deleteMarkerBtn");
 const resetFormBtn = document.getElementById("resetFormBtn");
 
 const searchInput = document.getElementById("searchInput");
-const filterCategory = document.getElementById("filterCategory");
 const markerList = document.getElementById("markerList");
+
+const statTotal = document.getElementById("statTotal");
+const statDealer = document.getElementById("statDealer");
+const statFraktionen = document.getElementById("statFraktionen");
+const statUgs = document.getElementById("statUgs");
+const statFelder = document.getElementById("statFelder");
+
+const categoryCheckboxes = document.querySelectorAll(".categoryCheckbox");
 
 const map = L.map("map", {
   crs: L.CRS.Simple,
@@ -44,31 +51,19 @@ const icons = {
     iconAnchor: [20, 40],
     popupAnchor: [0, -40]
   }),
-  vagos: L.icon({
+  felder: L.icon({
+    iconUrl: "icons/normal.png",
+    iconSize: [40, 40],
+    iconAnchor: [20, 40],
+    popupAnchor: [0, -40]
+  }),
+  fraktionen: L.icon({
     iconUrl: "icons/vagos.png",
     iconSize: [40, 40],
     iconAnchor: [20, 40],
     popupAnchor: [0, -40]
   }),
-  normal: L.icon({
-    iconUrl: "icons/normal.png",
-    iconSize: [40, 40],
-    iconAnchor: [20, 40],
-    popupAnchor: [0, -40]
-  }),
-  police: L.icon({
-    iconUrl: "icons/normal.png",
-    iconSize: [40, 40],
-    iconAnchor: [20, 40],
-    popupAnchor: [0, -40]
-  }),
-  ballas: L.icon({
-    iconUrl: "icons/normal.png",
-    iconSize: [40, 40],
-    iconAnchor: [20, 40],
-    popupAnchor: [0, -40]
-  }),
-  grove: L.icon({
+  ugs: L.icon({
     iconUrl: "icons/normal.png",
     iconSize: [40, 40],
     iconAnchor: [20, 40],
@@ -91,7 +86,13 @@ function normalizePos(pos) {
 }
 
 function getIcon(category) {
-  return icons[category] || icons.normal;
+  return icons[category] || icons.felder;
+}
+
+function getActiveCategories() {
+  return Array.from(categoryCheckboxes)
+    .filter(cb => cb.checked)
+    .map(cb => cb.value);
 }
 
 function setPreview(filename = "", localUrl = "") {
@@ -162,13 +163,21 @@ function clearMarkerLayers() {
 
 function getFilteredMarkers() {
   const search = searchInput.value.trim().toLowerCase();
-  const category = filterCategory.value;
+  const activeCategories = getActiveCategories();
 
   return markers.filter((marker) => {
     const matchesSearch = marker.name.toLowerCase().includes(search);
-    const matchesCategory = category === "all" || marker.category === category;
+    const matchesCategory = activeCategories.includes(marker.category);
     return matchesSearch && matchesCategory;
   });
+}
+
+function updateStats() {
+  statTotal.textContent = markers.length;
+  statDealer.textContent = markers.filter(m => m.category === "dealer").length;
+  statFraktionen.textContent = markers.filter(m => m.category === "fraktionen").length;
+  statUgs.textContent = markers.filter(m => m.category === "ugs").length;
+  statFelder.textContent = markers.filter(m => m.category === "felder").length;
 }
 
 function renderMarkerList() {
@@ -237,6 +246,7 @@ function drawMarkers() {
   });
 
   renderMarkerList();
+  updateStats();
 }
 
 async function loadMarkers() {
@@ -435,8 +445,10 @@ searchInput.addEventListener("input", () => {
   drawMarkers();
 });
 
-filterCategory.addEventListener("change", () => {
-  drawMarkers();
+categoryCheckboxes.forEach(cb => {
+  cb.addEventListener("change", () => {
+    drawMarkers();
+  });
 });
 
 updateAdminStatus();
