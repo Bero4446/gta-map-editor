@@ -188,9 +188,20 @@ app.get("/auth/discord/callback",
   }
 );
 
+app.get("/auth/discord",
+  passport.authenticate("discord")
+);
+
+app.get("/auth/discord/callback",
+  passport.authenticate("discord", { failureRedirect: "/" }),
+  (req, res) => {
+    res.redirect("/");
+  }
+);
 app.listen(PORT, () => {
   console.log("Server läuft auf Port " + PORT);
 });
+
 
 
 
