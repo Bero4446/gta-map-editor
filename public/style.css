@@ -1,17 +1,18 @@
 body{
 margin:0;
 font-family:Arial;
-background:#111;
+background:#0f0f0f;
 color:white;
 }
 
 .topbar{
 height:60px;
-background:#000;
+background:#1b1b1b;
 display:flex;
 align-items:center;
 justify-content:space-between;
 padding:0 20px;
+border-bottom:1px solid #333;
 }
 
 .logo{
@@ -19,16 +20,8 @@ font-size:20px;
 font-weight:bold;
 }
 
-.top-actions button{
-margin-left:10px;
-}
-
 #map{
-position:absolute;
-top:60px;
-bottom:0;
-left:0;
-right:0;
+height:calc(100vh - 60px);
 }
 
 #panel{
@@ -36,9 +29,10 @@ position:absolute;
 right:0;
 top:60px;
 width:320px;
-bottom:0;
-background:#1a1a1a;
-transition:0.3s;
+background:#1b1b1b;
+height:calc(100vh - 60px);
+border-left:1px solid #333;
+padding:15px;
 overflow:auto;
 }
 
@@ -48,34 +42,33 @@ right:-300px;
 
 #panelToggle{
 position:absolute;
-left:-40px;
+left:-35px;
 top:20px;
-background:#222;
-padding:10px;
+background:#1b1b1b;
+padding:6px;
 cursor:pointer;
 }
 
 .tabs{
 display:flex;
-border-bottom:1px solid #333;
+gap:5px;
+margin-bottom:10px;
 }
 
 .tab{
-flex:1;
-padding:10px;
-background:#222;
+background:#2a2a2a;
 border:none;
 color:white;
+padding:6px 10px;
 cursor:pointer;
 }
 
 .tab.active{
-background:#333;
+background:#5865f2;
 }
 
 .tab-content{
 display:none;
-padding:15px;
 }
 
 .tab-content.active{
@@ -85,24 +78,20 @@ display:block;
 input,select{
 width:100%;
 margin-bottom:10px;
-padding:8px;
-background:#111;
-border:1px solid #333;
+padding:6px;
+background:#2a2a2a;
+border:none;
 color:white;
 }
 
 button{
-padding:10px;
-background:#333;
+background:#5865f2;
 border:none;
 color:white;
+padding:8px;
 cursor:pointer;
 }
 
-button:hover{
-background:#444;
-}
-
-.vip-only{
-display:none;
+.marker-icon{
+font-size:22px;
 }
