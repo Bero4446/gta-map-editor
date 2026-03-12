@@ -16,7 +16,48 @@ app.use(session({
 
 app.use(passport.initialize());
 app.use(passport.session());
+passport.use(new DiscordStrategy({
+  clientID: process.env.DISCORD_CLIENT_ID,
+  clientSecret: process.env.DISCORD_CLIENT_SECRET,
+  callbackURL: process.env.DISCORD_REDIRECT_URI,
+  scope: ["identify"]
+},
+async (accessToken, refreshToken, profile, done) => {
 
+  try {
+
+    const guildId = process.env.DISCORD_GUILD_ID;
+
+    const res = await axios.get(
+      `https://discord.com/api/guilds/${guildId}/members/${profile.id}`,
+      {
+        headers: {
+          Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN}`
+        }
+      }
+    );
+
+    const roles = res.data.roles;
+
+    const isVip = roles.includes(process.env.DISCORD_VIP_ROLE_ID);
+
+    profile.isVip = isVip;
+
+    return done(null, profile);
+
+  } catch (err) {
+    console.error("Discord Role Fehler:", err);
+    return done(null, profile);
+  }
+
+}));
+passport.serializeUser((user, done) => {
+  done(null, user);
+});
+
+passport.deserializeUser((obj, done) => {
+  done(null, obj);
+});
 const PORT = process.env.PORT || 3000;
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL || "";
 
@@ -140,5 +181,6 @@ app.post("/upload", upload.single("file"), (req, res) => {
 app.listen(PORT, () => {
   console.log("Server läuft auf Port " + PORT);
 });
+
 
 
