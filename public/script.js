@@ -1,497 +1,125 @@
-const ADMIN_PASSWORD = "gta44";
-const ADMIN_NAME = "bero";
+const map = L.map("map").setView([0,0],2);
 
-let isAdmin = false;
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{
+maxZoom:19
+}).addTo(map);
+
 let markers = [];
-let markerLayers = [];
-let selectedMarkerId = null;
-let pendingLatLng = null;
 
-const CATEGORY_LABELS = {
-  dealer: "Dealer",
-  felder: "Felder",
-  ugs: "Ugs",
-  yakuza: "Yakuza",
-  lcn: "LCN",
-  ica: "ICA",
-  triaden: "Triaden",
-  sinaloa: "Sinaloa",
-  lsv: "LSV",
-  mg13: "MG13",
-  ballas: "Ballas",
-  midnight: "Midnight",
-  grove: "Grove",
-  rednecks: "Rednecks",
-  "52c": "52c",
-  atlas: "Atlas",
-  lostmc: "Lost MC",
-  adalet: "Adalet",
-  hoh: "HOH"
+async function loadMarkers(){
+
+const res = await fetch("/api/markers");
+const data = await res.json();
+
+markers=data;
+
+updateStats();
+renderMarkers();
+
+}
+
+function renderMarkers(){
+
+markers.forEach(m=>{
+
+const marker=L.marker([m.lat,m.lng]).addTo(map);
+
+marker.bindPopup(m.name);
+
+});
+
+}
+
+function updateStats(){
+
+document.getElementById("statTotal").innerText="Marker gesamt: "+markers.length;
+
+}
+
+map.on("click",e=>{
+
+document.getElementById("markerLat").value=e.latlng.lat;
+document.getElementById("markerLng").value=e.latlng.lng;
+
+});
+
+document.getElementById("saveMarker").onclick=async()=>{
+
+const name=document.getElementById("markerName").value;
+const category=document.getElementById("markerCategory").value;
+const lat=document.getElementById("markerLat").value;
+const lng=document.getElementById("markerLng").value;
+
+await fetch("/api/markers",{
+
+method:"POST",
+
+headers:{
+"Content-Type":"application/json"
+},
+
+body:JSON.stringify({
+name,
+category,
+lat,
+lng
+})
+
+});
+
+location.reload();
+
 };
 
-const adminLoginBtn = document.getElementById("adminLoginBtn");
-const adminStatus = document.getElementById("adminStatus");
+document.querySelectorAll(".tab").forEach(btn=>{
 
-const markerIdInput = document.getElementById("markerId");
-const markerNameInput = document.getElementById("markerName");
-const markerCategorySelect = document.getElementById("markerCategory");
-const markerLat = document.getElementById("markerLat");
-const markerLng = document.getElementById("markerLng");
-const markerScreenshotInput = document.getElementById("markerScreenshot");
-const screenshotPreview = document.getElementById("screenshotPreview");
-const noPreview = document.getElementById("noPreview");
+btn.onclick=()=>{
 
-const saveMarkerBtn = document.getElementById("saveMarkerBtn");
-const updateMarkerBtn = document.getElementById("updateMarkerBtn");
-const deleteMarkerBtn = document.getElementById("deleteMarkerBtn");
-const resetFormBtn = document.getElementById("resetFormBtn");
+document.querySelectorAll(".tab").forEach(b=>b.classList.remove("active"));
+document.querySelectorAll(".tab-content").forEach(c=>c.classList.remove("active"));
 
-const searchInput = document.getElementById("searchInput");
-const markerList = document.getElementById("markerList");
-const statsBox = document.getElementById("statsBox");
+btn.classList.add("active");
 
-const categoryCheckboxes = document.querySelectorAll(".categoryCheckbox");
+document.getElementById(btn.dataset.tab).classList.add("active");
 
-const map = L.map("map", {
-  crs: L.CRS.Simple,
-  minZoom: -2
-});
-
-const bounds = [[0, 0], [8192, 8192]];
-L.imageOverlay("gta-map.jpg", bounds).addTo(map);
-map.fitBounds(bounds);
-
-const icons = {
-  dealer: L.icon({ iconUrl: "icons/dealer.png", iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -40] }),
-  felder: L.icon({ iconUrl: "icons/normal.png", iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -40] }),
-  ugs: L.icon({ iconUrl: "icons/normal.png", iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -40] }),
-  yakuza: L.icon({ iconUrl: "icons/normal.png", iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -40] }),
-  lcn: L.icon({ iconUrl: "icons/normal.png", iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -40] }),
-  ica: L.icon({ iconUrl: "icons/normal.png", iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -40] }),
-  triaden: L.icon({ iconUrl: "icons/normal.png", iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -40] }),
-  sinaloa: L.icon({ iconUrl: "icons/normal.png", iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -40] }),
-  lsv: L.icon({ iconUrl: "icons/vagos.png", iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -40] }),
-  mg13: L.icon({ iconUrl: "icons/normal.png", iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -40] }),
-  ballas: L.icon({ iconUrl: "icons/normal.png", iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -40] }),
-  midnight: L.icon({ iconUrl: "icons/normal.png", iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -40] }),
-  grove: L.icon({ iconUrl: "icons/normal.png", iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -40] }),
-  rednecks: L.icon({ iconUrl: "icons/normal.png", iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -40] }),
-  "52c": L.icon({ iconUrl: "icons/normal.png", iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -40] }),
-  atlas: L.icon({ iconUrl: "icons/normal.png", iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -40] }),
-  lostmc: L.icon({ iconUrl: "icons/normal.png", iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -40] }),
-  adalet: L.icon({ iconUrl: "icons/normal.png", iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -40] }),
-  hoh: L.icon({ iconUrl: "icons/normal.png", iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -40] })
 };
 
-function updateAdminStatus() {
-  adminStatus.textContent = isAdmin ? `Admin eingeloggt: ${ADMIN_NAME}` : "Nicht eingeloggt";
-}
-
-function normalizePos(pos) {
-  if (Array.isArray(pos) && pos.length === 2) return pos;
-  if (pos && typeof pos.lat === "number" && typeof pos.lng === "number") return [pos.lat, pos.lng];
-  return [0, 0];
-}
-
-function getIcon(category) {
-  return icons[category] || icons.felder;
-}
-
-function getCategoryLabel(category) {
-  return CATEGORY_LABELS[category] || category;
-}
-
-function getActiveCategories() {
-  return Array.from(categoryCheckboxes).filter(cb => cb.checked).map(cb => cb.value);
-}
-
-function setPreview(filename = "", localUrl = "") {
-  if (localUrl) {
-    screenshotPreview.src = localUrl;
-    screenshotPreview.style.display = "block";
-    noPreview.style.display = "none";
-    return;
-  }
-
-  if (filename) {
-    screenshotPreview.src = `screenshots/${filename}`;
-    screenshotPreview.style.display = "block";
-    noPreview.style.display = "none";
-  } else {
-    screenshotPreview.removeAttribute("src");
-    screenshotPreview.style.display = "none";
-    noPreview.style.display = "block";
-  }
-}
-
-function setCoords(pos) {
-  const [lat, lng] = normalizePos(pos);
-  markerLat.textContent = lat.toFixed(2);
-  markerLng.textContent = lng.toFixed(2);
-}
-
-function clearForm() {
-  markerIdInput.value = "";
-  markerNameInput.value = "";
-  markerCategorySelect.value = "dealer";
-  markerScreenshotInput.value = "";
-  selectedMarkerId = null;
-  pendingLatLng = null;
-  markerLat.textContent = "-";
-  markerLng.textContent = "-";
-  setPreview();
-  renderMarkerList();
-}
-
-function fillForm(marker) {
-  markerIdInput.value = marker.id;
-  markerNameInput.value = marker.name;
-  markerCategorySelect.value = marker.category;
-  setCoords(marker.pos);
-  setPreview(marker.screenshot || "");
-  selectedMarkerId = marker.id;
-  pendingLatLng = normalizePos(marker.pos);
-  renderMarkerList();
-}
-
-function buildPopup(marker) {
-  const imageHtml = marker.screenshot
-    ? `<img src="screenshots/${marker.screenshot}" alt="Screenshot">`
-    : `<div style="margin-top:8px;color:#aaa;">Kein Screenshot</div>`;
-
-  return `
-    <b>${marker.name}</b><br>
-    Kategorie: ${getCategoryLabel(marker.category)}
-    ${imageHtml}
-  `;
-}
-
-function clearMarkerLayers() {
-  markerLayers.forEach(layer => map.removeLayer(layer));
-  markerLayers = [];
-}
-
-function getFilteredMarkers() {
-  const search = searchInput.value.trim().toLowerCase();
-  const activeCategories = getActiveCategories();
-
-  return markers.filter((marker) => {
-    const matchesSearch = marker.name.toLowerCase().includes(search);
-    const matchesCategory = activeCategories.includes(marker.category);
-    return matchesSearch && matchesCategory;
-  });
-}
-
-function updateStats() {
-  const order = [
-    "dealer", "felder", "ugs", "yakuza", "lcn", "ica", "triaden", "sinaloa",
-    "lsv", "mg13", "ballas", "midnight", "grove", "rednecks", "52c",
-    "atlas", "lostmc", "adalet", "hoh"
-  ];
-
-  let html = `<div>Marker gesamt: <strong>${markers.length}</strong></div>`;
-
-  order.forEach(category => {
-    const count = markers.filter(m => m.category === category).length;
-    html += `<div>${getCategoryLabel(category)}: <strong>${count}</strong></div>`;
-  });
-
-  statsBox.innerHTML = html;
-}
-
-function renderMarkerList() {
-  const filtered = getFilteredMarkers();
-  markerList.innerHTML = "";
-
-  if (filtered.length === 0) {
-    markerList.innerHTML = `<div class="marker-item"><div class="marker-item-meta">Keine Marker gefunden</div></div>`;
-    return;
-  }
-
-  filtered.forEach((marker) => {
-    const item = document.createElement("div");
-    item.className = "marker-item" + (marker.id === selectedMarkerId ? " active" : "");
-    item.innerHTML = `
-      <div class="marker-item-name">${marker.name}</div>
-      <div class="marker-item-meta">${getCategoryLabel(marker.category)}</div>
-    `;
-
-    item.addEventListener("click", () => {
-      fillForm(marker);
-      map.setView(normalizePos(marker.pos), 2);
-    });
-
-    markerList.appendChild(item);
-  });
-}
-
-function drawMarkers() {
-  clearMarkerLayers();
-
-  const filteredIds = new Set(getFilteredMarkers().map((m) => m.id));
-
-  markers.forEach((marker) => {
-    if (!filteredIds.has(marker.id)) return;
-
-    const pos = normalizePos(marker.pos);
-
-    const layer = L.marker(pos, {
-      icon: getIcon(marker.category),
-      draggable: isAdmin
-    }).addTo(map);
-
-    layer.bindPopup(buildPopup(marker));
-
-    layer.on("click", () => {
-      fillForm(marker);
-    });
-
-    if (isAdmin) {
-      layer.on("dragend", async function (e) {
-        const newPos = e.target.getLatLng();
-        marker.pos = [newPos.lat, newPos.lng];
-
-        if (selectedMarkerId === marker.id) {
-          pendingLatLng = marker.pos;
-          setCoords(marker.pos);
-        }
-
-        await saveMarkers();
-        drawMarkers();
-      });
-    }
-
-    markerLayers.push(layer);
-  });
-
-  renderMarkerList();
-  updateStats();
-}
-
-async function loadMarkers() {
-  try {
-    const res = await fetch("/markers");
-    const data = await res.json();
-
-    if (Array.isArray(data)) {
-      markers = data;
-    } else if (data && Array.isArray(data.markers)) {
-      markers = data.markers;
-    } else {
-      markers = [];
-    }
-
-    markers = markers.map((marker) => ({
-      ...marker,
-      pos: normalizePos(marker.pos)
-    }));
-
-    drawMarkers();
-  } catch (error) {
-    console.error("Fehler beim Laden der Marker:", error);
-  }
-}
-
-async function saveMarkers() {
-  try {
-    await fetch("/markers", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        adminName: ADMIN_NAME,
-        markers: markers
-      })
-    });
-  } catch (error) {
-    console.error("Fehler beim Speichern der Marker:", error);
-  }
-}
-
-async function uploadScreenshot(file) {
-  const formData = new FormData();
-  formData.append("file", file);
-
-  const res = await fetch("/upload", {
-    method: "POST",
-    body: formData
-  });
-
-  return await res.json();
-}
-
-adminLoginBtn.addEventListener("click", () => {
-  const pw = prompt("Admin Passwort:");
-
-  if (pw === ADMIN_PASSWORD) {
-    isAdmin = true;
-    updateAdminStatus();
-    drawMarkers();
-    alert("Admin aktiviert.");
-  } else if (pw !== null) {
-    alert("Falsches Passwort.");
-  }
 });
 
-map.on("click", (e) => {
-  if (!isAdmin) {
-    alert("Nur Admins können Marker erstellen.");
-    return;
-  }
+document.getElementById("panelToggle").onclick=()=>{
 
-  selectedMarkerId = null;
-  markerIdInput.value = "";
-  pendingLatLng = [e.latlng.lat, e.latlng.lng];
-  setCoords(pendingLatLng);
-  markerNameInput.focus();
-  renderMarkerList();
+document.getElementById("panel").classList.toggle("collapsed");
+
+};
+
+document.getElementById("discordLogin").onclick=()=>{
+
+window.location.href="/auth/discord";
+
+};
+
+async function checkUser(){
+
+const res=await fetch("/api/user");
+const data=await res.json();
+
+if(data.loggedIn){
+
+document.getElementById("loginStatus").innerText=data.username;
+
+if(data.isVip){
+
+document.querySelectorAll(".vip-only").forEach(el=>{
+
+el.style.display="block";
+
 });
 
-markerScreenshotInput.addEventListener("change", () => {
-  const file = markerScreenshotInput.files[0];
-  if (file) {
-    const localUrl = URL.createObjectURL(file);
-    setPreview("", localUrl);
-  } else {
-    const existingMarker = markers.find((m) => m.id === selectedMarkerId);
-    setPreview(existingMarker?.screenshot || "");
-  }
-});
+}
 
-saveMarkerBtn.addEventListener("click", async () => {
-  if (!isAdmin) {
-    alert("Nur Admins können Marker speichern.");
-    return;
-  }
-
-  const name = markerNameInput.value.trim();
-  if (!name) {
-    alert("Bitte einen Namen eingeben.");
-    return;
-  }
-
-  if (!pendingLatLng) {
-    alert("Bitte zuerst auf die Karte klicken, um eine Position zu wählen.");
-    return;
-  }
-
-  let screenshotFile = "";
-  const file = markerScreenshotInput.files[0];
-
-  if (file) {
-    const uploadResult = await uploadScreenshot(file);
-    screenshotFile = uploadResult.file || "";
-  }
-
-  const newMarker = {
-    id: String(Date.now()),
-    name,
-    category: markerCategorySelect.value,
-    pos: pendingLatLng,
-    screenshot: screenshotFile
-  };
-
-  markers.push(newMarker);
-  await saveMarkers();
-  fillForm(newMarker);
-  drawMarkers();
-  alert("Marker gespeichert.");
-});
-
-updateMarkerBtn.addEventListener("click", async () => {
-  if (!isAdmin) {
-    alert("Nur Admins können Marker bearbeiten.");
-    return;
-  }
-
-  const id = markerIdInput.value;
-  const marker = markers.find((m) => m.id === id);
-
-  if (!marker) {
-    alert("Kein Marker ausgewählt.");
-    return;
-  }
-
-  const name = markerNameInput.value.trim();
-  if (!name) {
-    alert("Bitte einen Namen eingeben.");
-    return;
-  }
-
-  marker.name = name;
-  marker.category = markerCategorySelect.value;
-  marker.pos = pendingLatLng || marker.pos;
-
-  const file = markerScreenshotInput.files[0];
-  if (file) {
-    const uploadResult = await uploadScreenshot(file);
-    marker.screenshot = uploadResult.file || marker.screenshot;
-  }
-
-  await saveMarkers();
-  fillForm(marker);
-  drawMarkers();
-  alert("Marker aktualisiert.");
-});
-
-deleteMarkerBtn.addEventListener("click", async () => {
-  if (!isAdmin) {
-    alert("Nur Admins können Marker löschen.");
-    return;
-  }
-
-  const id = markerIdInput.value;
-  if (!id) {
-    alert("Kein Marker ausgewählt.");
-    return;
-  }
-
-  const ok = confirm("Marker wirklich löschen?");
-  if (!ok) return;
-
-  markers = markers.filter((marker) => marker.id !== id);
-  await saveMarkers();
-  clearForm();
-  drawMarkers();
-});
-
-resetFormBtn.addEventListener("click", () => {
-  clearForm();
-});
-
-searchInput.addEventListener("input", () => {
-  drawMarkers();
-});
-
-categoryCheckboxes.forEach(cb => {
-  cb.addEventListener("change", () => {
-    drawMarkers();
-  });
-});
-
-updateAdminStatus();
-clearForm();
-loadMarkers();
-async function checkUser() {
-
-  const res = await fetch("/api/user");
-  const data = await res.json();
-
-  if (data.loggedIn) {
-
-    console.log("Eingeloggt als:", data.username);
-
-    if (data.isVip) {
-      document.getElementById("schwarzmarktTab").style.display = "block";
-    }
-
-  }
+}
 
 }
 
 checkUser();
-
-document.getElementById("discordLogin").onclick = () => {
-  window.location.href = "/auth/discord";
-};
+loadMarkers();
