@@ -5,7 +5,7 @@ minZoom:-2
 
 const bounds=[[0,0],[8192,8192]];
 
-L.imageOverlay("map.jpg",bounds).addTo(map);
+L.imageOverlay("public/GTAV-HD-MAP-satellite.jpg",bounds).addTo(map);
 
 map.fitBounds(bounds);
 
@@ -262,3 +262,4 @@ await loadMarkers();
 }
 
 init();
+
