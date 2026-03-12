@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+
 <html lang="de">
 <head>
 
@@ -17,13 +18,16 @@
 <div class="topbar">
 
 <div class="logo">
-🗺 GTA RP MAP
+GTA RP MAP
 </div>
 
 <div class="top-actions">
 
-<button id="discordLogin">Discord Login</button>
-<span id="loginStatus">Nicht eingeloggt</span>
+<button id="discordLogin">Discord Login</button> <button id="adminLogin">Admin Login</button>
+
+<span id="loginStatus">
+Nicht eingeloggt
+</span>
 
 </div>
 
@@ -37,10 +41,7 @@
 
 <div class="tabs">
 
-<button class="tab active" data-tab="editor">Editor</button>
-<button class="tab" data-tab="filter">Filter</button>
-<button class="tab" data-tab="stats">Statistik</button>
-<button class="tab vip-only" data-tab="vip">🕶 Schwarzmarkt</button>
+<button class="tab active" data-tab="editor">Editor</button> <button class="tab" data-tab="filter">Filter</button> <button class="tab" data-tab="stats">Statistik</button> <button class="tab vip-only" data-tab="vip">Schwarzmarkt</button>
 
 </div>
 
@@ -62,7 +63,7 @@
 <input id="markerLat" placeholder="Lat">
 <input id="markerLng" placeholder="Lng">
 
-<button id="saveMarker">Marker speichern</button>
+<button id="saveMarker">Speichern</button>
 
 </div>
 
@@ -70,9 +71,7 @@
 
 <h2>Filter</h2>
 
-<label><input type="checkbox" checked data-filter="Dealer"> 💊 Dealer</label>
-<label><input type="checkbox" checked data-filter="UG"> 🔫 UG</label>
-<label><input type="checkbox" checked data-filter="Feld"> 🌿 Feld</label>
+<label><input type="checkbox" checked data-filter="Dealer"> 💊 Dealer</label> <label><input type="checkbox" checked data-filter="UG"> 🔫 UG</label> <label><input type="checkbox" checked data-filter="Feld"> 🌿 Feld</label>
 
 </div>
 
@@ -89,8 +88,8 @@
 
 <div class="tab-content vip-only" id="vip">
 
-<h2>🕶 Schwarzmarkt</h2>
-<p>Nur für Discord VIP sichtbar.</p>
+<h2>Schwarzmarkt</h2>
+<p>Nur für Discord VIP sichtbar</p>
 
 </div>
 
