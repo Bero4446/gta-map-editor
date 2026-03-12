@@ -1,5 +1,9 @@
 const express = require("express");
 const fs = require("fs");
+const session = require("express-session");
+const passport = require("passport");
+const DiscordStrategy = require("passport-discord").Strategy;
+const axios = require("axios");
 const multer = require("multer");
 
 const app = express();
@@ -126,3 +130,4 @@ app.post("/upload", upload.single("file"), (req, res) => {
 app.listen(PORT, () => {
   console.log("Server läuft auf Port " + PORT);
 });
+
