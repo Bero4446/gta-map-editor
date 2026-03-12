@@ -193,7 +193,22 @@ app.get("/auth/discord",
 );
 
 app.get("/auth/discord/callback",
-  passport.authenticate("discord", { failureRedirect: "/" }),
+  app.get("/api/user", (req, res) => {
+
+  if (!req.user) {
+    return res.json({
+      loggedIn: false
+    });
+  }
+
+  res.json({
+    loggedIn: true,
+    username: req.user.username,
+    isVip: req.user.isVip || false
+  });
+
+});
+        passport.authenticate("discord", { failureRedirect: "/" }),
   (req, res) => {
     res.redirect("/");
   }
@@ -201,6 +216,7 @@ app.get("/auth/discord/callback",
 app.listen(PORT, () => {
   console.log("Server läuft auf Port " + PORT);
 });
+
 
 
 
