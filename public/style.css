@@ -26,6 +26,7 @@ margin-left:8px;
 
 #map{
 height:calc(100vh - 60px);
+width:calc(100% - 340px);
 }
 
 #panel{
@@ -105,3 +106,4 @@ button:hover
 .marker-icon{
 font-size:22px;
 }
+
