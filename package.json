@@ -1,7 +1,7 @@
 {
   "name": "gta-map-server",
   "version": "1.0.0",
-  "description": "GTA Map Server",
+  "description": "GTA RP Map Server",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
