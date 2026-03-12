@@ -187,38 +187,27 @@ app.get("/auth/discord/callback",
     res.redirect("/");
   }
 );
-
-app.get("/auth/discord",
-  passport.authenticate("discord")
-);
+app.get("/auth/discord", passport.authenticate("discord"));
 
 app.get("/auth/discord/callback",
-  app.get("/api/user", (req, res) => {
-
-  if (!req.user) {
-    return res.json({
-      loggedIn: false
-    });
-  }
-
-  res.json({
-    loggedIn: true,
-    username: req.user.username,
-    isVip: req.user.isVip || false
-  });
-
-});
-        passport.authenticate("discord", { failureRedirect: "/" }),
-  (req, res) => {
-    res.redirect("/");
-  }
+    passport.authenticate("discord", { failureRedirect: "/" }),
+    (req, res) => {
+        res.redirect("/");
+    }
 );
-app.listen(PORT, () => {
-  console.log("Server läuft auf Port " + PORT);
+
+app.get("/api/user", (req, res) => {
+
+    if (!req.user) {
+        return res.json({
+            loggedIn: false
+        });
+    }
+
+    res.json({
+        loggedIn: true,
+        username: req.user.username,
+        isVip: req.user.isVip || false
+    });
+
 });
-
-
-
-
-
-
