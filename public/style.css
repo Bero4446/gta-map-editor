@@ -1,0 +1,225 @@
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  height: 100%;
+  font-family: Arial, sans-serif;
+  background: #111;
+  color: #fff;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  flex: 0 0 auto;
+  background: #111;
+  border-bottom: 1px solid #2b2b2b;
+  padding: 12px 16px;
+}
+
+.topbar-left {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 24px;
+}
+
+.topbar-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.topbar button {
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid #444;
+  background: #1c1c1c;
+  color: white;
+  cursor: pointer;
+}
+
+#adminStatus {
+  color: #bbb;
+  font-size: 14px;
+}
+
+.app-layout {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 380px;
+}
+
+.map-section {
+  min-width: 0;
+  min-height: 0;
+}
+
+#map {
+  width: 100%;
+  height: 100%;
+  background: #000;
+}
+
+.sidebar {
+  border-left: 1px solid #2b2b2b;
+  background: #161616;
+  overflow-y: auto;
+  padding: 14px;
+}
+
+.panel {
+  background: #1c1c1c;
+  border: 1px solid #2f2f2f;
+  border-radius: 10px;
+  padding: 14px;
+  margin-bottom: 14px;
+}
+
+.panel h2 {
+  margin-top: 0;
+  margin-bottom: 12px;
+  font-size: 20px;
+}
+
+.panel label {
+  display: block;
+  margin: 10px 0 6px;
+  font-size: 14px;
+  color: #ccc;
+}
+
+.panel input[type="text"],
+.panel select,
+.panel input[type="file"] {
+  width: 100%;
+  padding: 9px 10px;
+  border-radius: 6px;
+  border: 1px solid #444;
+  background: #101010;
+  color: white;
+}
+
+.coords-box {
+  display: grid;
+  gap: 6px;
+  background: #101010;
+  border: 1px solid #333;
+  border-radius: 6px;
+  padding: 10px;
+  color: #bbb;
+  font-size: 14px;
+}
+
+.preview-wrap {
+  margin-top: 10px;
+  background: #101010;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 10px;
+  min-height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#screenshotPreview {
+  max-width: 100%;
+  max-height: 220px;
+  border-radius: 8px;
+  display: none;
+}
+
+#noPreview {
+  color: #888;
+  font-size: 14px;
+}
+
+.button-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.button-row button {
+  padding: 10px;
+  border-radius: 6px;
+  border: 1px solid #444;
+  background: #111;
+  color: white;
+  cursor: pointer;
+}
+
+.button-row button:hover,
+.topbar button:hover,
+.marker-item:hover {
+  background: #222;
+}
+
+.info-text {
+  margin-top: 12px;
+  color: #aaa;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.marker-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.marker-item {
+  padding: 10px;
+  border: 1px solid #333;
+  border-radius: 8px;
+  background: #101010;
+  cursor: pointer;
+}
+
+.marker-item.active {
+  border-color: #888;
+  background: #202020;
+}
+
+.marker-item-name {
+  font-weight: bold;
+  margin-bottom: 4px;
+}
+
+.marker-item-meta {
+  color: #aaa;
+  font-size: 13px;
+}
+
+.leaflet-popup-content img {
+  max-width: 220px;
+  border-radius: 8px;
+  display: block;
+  margin-top: 8px;
+}
+
+@media (max-width: 1100px) {
+  .app-layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: 55vh auto;
+  }
+
+  .sidebar {
+    border-left: none;
+    border-top: 1px solid #2b2b2b;
+  }
+}

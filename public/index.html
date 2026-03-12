@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GTA Map Editor</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-left">
+      <h1>GTA 5 Map Editor</h1>
+      <div class="topbar-controls">
+        <button id="adminLoginBtn" type="button">Admin Login</button>
+        <span id="adminStatus">Nicht eingeloggt</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="app-layout">
+    <section class="map-section">
+      <div id="map"></div>
+    </section>
+
+    <aside class="sidebar">
+      <div class="panel">
+        <h2>Marker bearbeiten</h2>
+
+        <input type="hidden" id="markerId" />
+
+        <label for="markerName">Name</label>
+        <input type="text" id="markerName" placeholder="Ort eingeben..." />
+
+        <label for="markerCategory">Kategorie</label>
+        <select id="markerCategory">
+          <option value="dealer">Dealer</option>
+          <option value="vagos">Los Santos Vagos</option>
+          <option value="normal">Normal</option>
+        </select>
+
+        <label>Position</label>
+        <div class="coords-box">
+          <div>Lat: <span id="markerLat">-</span></div>
+          <div>Lng: <span id="markerLng">-</span></div>
+        </div>
+
+        <label for="markerScreenshot">Screenshot</label>
+        <input type="file" id="markerScreenshot" accept="image/*" />
+
+        <div class="preview-wrap">
+          <img id="screenshotPreview" alt="Screenshot Vorschau" />
+          <div id="noPreview">Kein Screenshot ausgewählt</div>
+        </div>
+
+        <div class="button-row">
+          <button id="saveMarkerBtn" type="button">Speichern</button>
+          <button id="updateMarkerBtn" type="button">Aktualisieren</button>
+          <button id="deleteMarkerBtn" type="button">Löschen</button>
+          <button id="resetFormBtn" type="button">Neu</button>
+        </div>
+
+        <p class="info-text">
+          Als Admin: Auf freie Stelle der Karte klicken, um eine Position für einen neuen Marker zu wählen.
+          Auf einen Marker klicken, um ihn rechts zu bearbeiten.
+        </p>
+      </div>
+
+      <div class="panel">
+        <h2>Marker-Liste</h2>
+
+        <input type="text" id="searchInput" placeholder="Marker suchen..." />
+
+        <select id="filterCategory">
+          <option value="all">Alle Kategorien</option>
+          <option value="dealer">Dealer</option>
+          <option value="vagos">Los Santos Vagos</option>
+          <option value="normal">Normal</option>
+        </select>
+
+        <div id="markerList" class="marker-list"></div>
+      </div>
+    </aside>
+  </main>
+
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
