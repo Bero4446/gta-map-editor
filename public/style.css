@@ -111,3 +111,10 @@ z-index:1000;
 }
 
 
+#panel.collapsed{
+right:-340px;
+}
+
+.marker-icon{
+font-size:22px;
+}
