@@ -1,6 +1,13 @@
-const map = L.map("map").setView([0,0],3);
+const map = L.map("map", {
+crs: L.CRS.Simple,
+minZoom: -2
+});
 
-L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19}).addTo(map);
+const bounds = [[0,0],[8192,8192]];
+
+L.imageOverlay("map.jpg", bounds).addTo(map);
+
+map.fitBounds(bounds);
 
 let markers=[];
 let markerObjects=[];
@@ -15,6 +22,8 @@ Schwarzmarkt:L.divIcon({html:"🕶",className:"marker-icon"})
 
 async function checkUser(){
 
+try{
+
 const res=await fetch("/api/user");
 user=await res.json();
 
@@ -24,10 +33,16 @@ document.getElementById("loginStatus").innerText="👤 "+user.username;
 
 if(user.isVip){
 
-document.querySelectorAll(".vip-only").forEach(el=>el.style.display="block");
+document.querySelectorAll(".vip-only").forEach(el=>{
+el.style.display="block";
+});
 
 }
 
+}
+
+}catch(e){
+console.log("User check Fehler");
 }
 
 }
@@ -52,7 +67,7 @@ markers.forEach(m=>{
 if(m.category==="Schwarzmarkt" && !user.isVip) return;
 
 const marker=L.marker([m.lat,m.lng],{
-icon:icons[m.category]||icons.Dealer
+icon:icons||icons.Dealer
 }).addTo(map);
 
 marker.bindPopup(`<b>${m.name}</b><br>${m.category}`);
@@ -80,8 +95,8 @@ document.getElementById("statField").innerText=
 
 map.on("click",e=>{
 
-document.getElementById("markerLat").value=e.latlng.lat.toFixed(6);
-document.getElementById("markerLng").value=e.latlng.lng.toFixed(6);
+document.getElementById("markerLat").value=e.latlng.lat.toFixed(4);
+document.getElementById("markerLng").value=e.latlng.lng.toFixed(4);
 
 });
 
@@ -92,7 +107,12 @@ const category=document.getElementById("markerCategory").value;
 const lat=parseFloat(document.getElementById("markerLat").value);
 const lng=parseFloat(document.getElementById("markerLng").value);
 
-const marker={
+if(!name||!lat||!lng){
+alert("Bitte Felder ausfüllen");
+return;
+}
+
+const newMarker={
 id:Date.now(),
 name,
 category,
@@ -100,7 +120,7 @@ lat,
 lng
 };
 
-markers.push(marker);
+markers.push(newMarker);
 
 await fetch("/markers",{
 method:"POST",
@@ -136,6 +156,18 @@ document.getElementById("panel").classList.toggle("collapsed");
 
 document.getElementById("discordLogin").onclick=()=>{
 window.location.href="/auth/discord";
+};
+
+document.getElementById("adminLogin").onclick=()=>{
+
+const pw=prompt("Admin Passwort");
+
+if(pw==="admin123"){
+alert("Admin Login erfolgreich");
+}else{
+alert("Falsches Passwort");
+}
+
 };
 
 async function init(){
