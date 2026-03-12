@@ -177,10 +177,21 @@ app.post("/markers", async (req, res) => {
 app.post("/upload", upload.single("file"), (req, res) => {
   res.json({ file: req.file.filename });
 });
+app.get("/auth/discord",
+  passport.authenticate("discord")
+);
+
+app.get("/auth/discord/callback",
+  passport.authenticate("discord", { failureRedirect: "/" }),
+  (req, res) => {
+    res.redirect("/");
+  }
+);
 
 app.listen(PORT, () => {
   console.log("Server läuft auf Port " + PORT);
 });
+
 
 
 
