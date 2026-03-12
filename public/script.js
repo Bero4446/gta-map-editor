@@ -244,7 +244,13 @@ async function loadMarkers() {
     const res = await fetch("/markers");
     const data = await res.json();
 
-    markers = Array.isArray(data) ? data : [];
+    if (Array.isArray(data)) {
+      markers = data;
+    } else if (data && Array.isArray(data.markers)) {
+      markers = data.markers;
+    } else {
+      markers = [];
+    }
 
     markers = markers.map((marker) => ({
       ...marker,
