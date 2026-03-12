@@ -13,7 +13,7 @@ map.fitBounds(bounds);
 let markers=[];
 let markerObjects=[];
 
-/* ICONS */
+/* MARKER ICONS */
 
 const icons={
 Dealer:L.divIcon({html:"💊",className:"marker-icon"}),
@@ -88,7 +88,7 @@ document.getElementById("markerLng").value=lng;
 
 });
 
-/* SAVE MARKER */
+/* CREATE MARKER */
 
 document.getElementById("saveMarker").onclick=async()=>{
 
@@ -102,4 +102,81 @@ const file=document.getElementById("markerImage")?.files[0];
 let image="";
 
 if(file){
-image=U
+image=URL.createObjectURL(file);
+}
+
+const newMarker={
+id:Date.now().toString(),
+name,
+category,
+lat,
+lng,
+image
+};
+
+markers.push(newMarker);
+
+await saveMarkers();
+
+renderMarkers();
+updateStats();
+
+};
+
+/* DELETE MARKER */
+
+function deleteMarker(id){
+
+if(!confirm("Marker wirklich löschen?")) return;
+
+markers=markers.filter(m=>m.id!==id);
+
+saveMarkers();
+renderMarkers();
+updateStats();
+
+}
+
+/* SAVE TO SERVER */
+
+async function saveMarkers(){
+
+await fetch("/markers",{
+method:"POST",
+headers:{"Content-Type":"application/json"},
+body:JSON.stringify({
+markers,
+adminName:"Admin"
+})
+});
+
+}
+
+/* MARKER SEARCH */
+
+document.getElementById("markerSearch")?.addEventListener("input",function(){
+
+const search=this.value.toLowerCase();
+
+markerObjects.forEach(marker=>{
+
+const name=marker.options.title||"";
+
+if(name.toLowerCase().includes(search)){
+marker.addTo(map);
+}else{
+map.removeLayer(marker);
+}
+
+});
+
+});
+
+/* PANEL TOGGLE */
+
+document.getElementById("panelToggle").onclick=()=>{
+
+const panel=document.getElementById("panel");
+const mapDiv=document.getElementById("map");
+
+panel.classList.to
