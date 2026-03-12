@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="de">
 <head>
+
 <meta charset="UTF-8">
 <title>GTA RP Map</title>
 
@@ -8,6 +9,7 @@
 <link rel="stylesheet" href="style.css"/>
 
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
 </head>
 
 <body>
@@ -15,17 +17,13 @@
 <div class="topbar">
 
 <div class="logo">
-GTA RP MAP
+🗺 GTA RP MAP
 </div>
 
 <div class="top-actions">
 
 <button id="discordLogin">Discord Login</button>
-<button id="adminLogin">Admin Login</button>
-
-<span id="loginStatus">
-Nicht eingeloggt
-</span>
+<span id="loginStatus">Nicht eingeloggt</span>
 
 </div>
 
@@ -35,27 +33,14 @@ Nicht eingeloggt
 
 <div id="panel">
 
-<div id="panelToggle">
-☰
-</div>
+<div id="panelToggle">☰</div>
 
 <div class="tabs">
 
-<button class="tab active" data-tab="editor">
-Editor
-</button>
-
-<button class="tab" data-tab="filter">
-Filter
-</button>
-
-<button class="tab" data-tab="stats">
-Statistik
-</button>
-
-<button class="tab vip-only" data-tab="vip">
-Schwarzmarkt
-</button>
+<button class="tab active" data-tab="editor">Editor</button>
+<button class="tab" data-tab="filter">Filter</button>
+<button class="tab" data-tab="stats">Statistik</button>
+<button class="tab vip-only" data-tab="vip">🕶 Schwarzmarkt</button>
 
 </div>
 
@@ -67,21 +52,17 @@ Schwarzmarkt
 
 <select id="markerCategory">
 
-<option value="Dealer">Dealer</option>
-<option value="Fraktion">Fraktion</option>
-<option value="UG">UG</option>
-<option value="Feld">Feld</option>
+<option value="Dealer">💊 Dealer</option>
+<option value="UG">🔫 UG</option>
+<option value="Feld">🌿 Feld</option>
+<option value="Schwarzmarkt">🕶 Schwarzmarkt</option>
 
 </select>
 
 <input id="markerLat" placeholder="Lat">
 <input id="markerLng" placeholder="Lng">
 
-<input type="file" id="screenshot">
-
-<button id="saveMarker">
-Speichern
-</button>
+<button id="saveMarker">Marker speichern</button>
 
 </div>
 
@@ -89,25 +70,9 @@ Speichern
 
 <h2>Filter</h2>
 
-<label>
-<input type="checkbox" checked data-filter="Dealer">
-Dealer
-</label>
-
-<label>
-<input type="checkbox" checked data-filter="Fraktion">
-Fraktionen
-</label>
-
-<label>
-<input type="checkbox" checked data-filter="UG">
-UGs
-</label>
-
-<label>
-<input type="checkbox" checked data-filter="Feld">
-Felder
-</label>
+<label><input type="checkbox" checked data-filter="Dealer"> 💊 Dealer</label>
+<label><input type="checkbox" checked data-filter="UG"> 🔫 UG</label>
+<label><input type="checkbox" checked data-filter="Feld"> 🌿 Feld</label>
 
 </div>
 
@@ -115,29 +80,17 @@ Felder
 
 <h2>Statistik</h2>
 
-<div id="statTotal">
-Marker gesamt: 0
-</div>
-
-<div id="statDealer">
-Dealer: 0
-</div>
-
-<div id="statFaction">
-Fraktionen: 0
-</div>
-
-<div id="statUG">
-UGs: 0
-</div>
+<div id="statTotal"></div>
+<div id="statDealer"></div>
+<div id="statUG"></div>
+<div id="statField"></div>
 
 </div>
 
 <div class="tab-content vip-only" id="vip">
 
-<h2>Schwarzmarkt</h2>
-
-<p>Nur Discord VIP Zugriff</p>
+<h2>🕶 Schwarzmarkt</h2>
+<p>Nur für Discord VIP sichtbar.</p>
 
 </div>
 
