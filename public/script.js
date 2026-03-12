@@ -12,7 +12,6 @@ map.fitBounds(bounds);
 
 let markers=[];
 let markerObjects=[];
-let selectedMarker=null;
 
 /* ICONS */
 
@@ -46,11 +45,19 @@ markers.forEach(m=>{
 
 const marker=L.marker([m.lat,m.lng],{
 icon:icons||icons.Dealer,
-draggable:true
+draggable:true,
+title:m.name
 }).addTo(map);
 
-marker.bindPopup(`<b>${m.name}</b><br>
-Kategorie: ${m.category}<br><br> <button onclick="editMarker('${m.id}')">Bearbeiten</button> <button onclick="deleteMarker('${m.id}')">Löschen</button>`);
+marker.bindPopup(` <b>${m.name}</b><br>
+Kategorie: ${m.category}<br>
+Lat: ${m.lat}<br>
+Lng: ${m.lng}<br>
+
+${m.image ? `<img src="${m.image}" style="width:200px;margin-top:5px;">` : ""}
+
+<br><br> <button onclick="deleteMarker('${m.id}')">Löschen</button>
+`);
 
 marker.on("dragend",e=>{
 
@@ -90,103 +97,9 @@ const category=document.getElementById("markerCategory").value;
 const lat=parseFloat(document.getElementById("markerLat").value);
 const lng=parseFloat(document.getElementById("markerLng").value);
 
-if(!name||!lat||!lng){
-alert("Bitte Felder ausfüllen");
-return;
-}
+const file=document.getElementById("markerImage")?.files[0];
 
-markers.push({
-id:Date.now().toString(),
-name,
-category,
-lat,
-lng
-});
+let image="";
 
-await saveMarkers();
-
-renderMarkers();
-updateStats();
-
-};
-
-/* DELETE */
-
-function deleteMarker(id){
-
-if(!confirm("Marker wirklich löschen?")) return;
-
-markers=markers.filter(m=>m.id!==id);
-
-saveMarkers();
-renderMarkers();
-updateStats();
-
-}
-
-/* EDIT */
-
-function editMarker(id){
-
-const marker=markers.find(m=>m.id===id);
-
-selectedMarker=marker;
-
-document.getElementById("markerName").value=marker.name;
-document.getElementById("markerCategory").value=marker.category;
-document.getElementById("markerLat").value=marker.lat;
-document.getElementById("markerLng").value=marker.lng;
-
-}
-
-/* SAVE TO SERVER */
-
-async function saveMarkers(){
-
-await fetch("/markers",{
-method:"POST",
-headers:{"Content-Type":"application/json"},
-body:JSON.stringify({
-markers,
-adminName:"Admin"
-})
-});
-
-}
-
-/* PANEL TOGGLE */
-
-document.getElementById("panelToggle").onclick=()=>{
-
-const panel=document.getElementById("panel");
-const mapDiv=document.getElementById("map");
-
-panel.classList.toggle("collapsed");
-
-if(panel.classList.contains("collapsed")){
-mapDiv.style.width="100%";
-}else{
-mapDiv.style.width="calc(100% - 340px)";
-}
-
-};
-
-/* TABS */
-
-document.querySelectorAll(".tab").forEach(btn=>{
-
-btn.onclick=()=>{
-
-document.querySelectorAll(".tab").forEach(b=>b.classList.remove("active"));
-document.querySelectorAll(".tab-content").forEach(c=>c.classList.remove("active"));
-
-btn.classList.add("active");
-document.getElementById(btn.dataset.tab).classList.add("active");
-
-};
-
-});
-
-/* INIT */
-
-loadMarkers();
+if(file){
+image=U
