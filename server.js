@@ -1,5 +1,6 @@
 const express = require("express");
 const fs = require("fs");
+const path = require("path");
 const session = require("express-session");
 const passport = require("passport");
 const DiscordStrategy = require("passport-discord").Strategy;
@@ -9,207 +10,257 @@ const multer = require("multer");
 const app = express();
 
 const PORT = process.env.PORT || 3000;
+const MARKERS_FILE = path.join(__dirname, "markers.json");
+const PUBLIC_DIR = path.join(__dirname, "public");
+const SCREENSHOT_DIR = path.join(PUBLIC_DIR, "screenshots");
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL || "";
-const MARKERS_FILE = "markers.json";
 
-/* ---------------------- Middleware ---------------------- */
+if (!fs.existsSync(PUBLIC_DIR)) fs.mkdirSync(PUBLIC_DIR, { recursive: true });
+if (!fs.existsSync(SCREENSHOT_DIR)) fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
+if (!fs.existsSync(MARKERS_FILE)) fs.writeFileSync(MARKERS_FILE, "[]", "utf8");
 
-app.use(express.json());
-app.use(express.static("public"));
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true }));
+app.use(express.static(PUBLIC_DIR));
 
-app.use(session({
-  secret: process.env.SESSION_SECRET || "secret",
-  resave: false,
-  saveUninitialized: false
-}));
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET || "change-me",
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      httpOnly: true,
+      sameSite: "lax"
+    }
+  })
+);
 
 app.use(passport.initialize());
 app.use(passport.session());
 
-/* ---------------------- Discord Login ---------------------- */
-
-passport.use(new DiscordStrategy({
-  clientID: process.env.DISCORD_CLIENT_ID,
-  clientSecret: process.env.DISCORD_CLIENT_SECRET,
-  callbackURL: process.env.DISCORD_REDIRECT_URI,
-  scope: ["identify"]
-},
-async (accessToken, refreshToken, profile, done) => {
-
-  try {
-
-    const guildId = process.env.DISCORD_GUILD_ID;
-
-    const res = await axios.get(
-      `https://discord.com/api/guilds/${guildId}/members/${profile.id}`,
-      {
-        headers: {
-          Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN}`
-        }
-      }
-    );
-
-    const roles = res.data.roles;
-    const isVip = roles.includes(process.env.DISCORD_VIP_ROLE_ID);
-
-    profile.isVip = isVip;
-
-    return done(null, profile);
-
-  } catch (err) {
-
-    console.error("Discord Role Fehler:", err);
-    return done(null, profile);
-
-  }
-
-}));
-
 passport.serializeUser((user, done) => done(null, user));
 passport.deserializeUser((obj, done) => done(null, obj));
 
-/* ---------------------- File Upload ---------------------- */
+passport.use(
+  new DiscordStrategy(
+    {
+      clientID: process.env.DISCORD_CLIENT_ID,
+      clientSecret: process.env.DISCORD_CLIENT_SECRET,
+      callbackURL: process.env.DISCORD_REDIRECT_URI,
+      scope: ["identify"]
+    },
+    async (accessToken, refreshToken, profile, done) => {
+      try {
+        const guildId = process.env.DISCORD_GUILD_ID;
+        const vipRoleId = process.env.DISCORD_VIP_ROLE_ID;
+        const adminRoleId = process.env.DISCORD_ADMIN_ROLE_ID;
 
-const upload = multer({ dest: "public/screenshots/" });
+        let isVip = false;
+        let isAdmin = false;
 
-/* ---------------------- Marker Storage ---------------------- */
+        if (guildId && process.env.DISCORD_BOT_TOKEN) {
+          const response = await axios.get(
+            `https://discord.com/api/guilds/${guildId}/members/${profile.id}`,
+            {
+              headers: {
+                Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN}`
+              }
+            }
+          );
 
-function loadMarkers() {
+          const roles = Array.isArray(response.data.roles) ? response.data.roles : [];
+          isVip = !!vipRoleId && roles.includes(vipRoleId);
+          isAdmin = !!adminRoleId && roles.includes(adminRoleId);
+        }
 
-  if (!fs.existsSync(MARKERS_FILE)) {
-    fs.writeFileSync(MARKERS_FILE, "[]");
+        profile.isVip = isVip;
+        profile.isAdmin = isAdmin;
+
+        return done(null, profile);
+      } catch (error) {
+        console.error("Discord Rollenfehler:", error.response?.data || error.message);
+        profile.isVip = false;
+        profile.isAdmin = false;
+        return done(null, profile);
+      }
+    }
+  )
+);
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, SCREENSHOT_DIR),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname || "").toLowerCase() || ".jpg";
+    cb(null, `${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`);
+  }
+});
+
+const upload = multer({ storage });
+
+function normalizeMarker(marker) {
+  if (!marker || typeof marker !== "object") return null;
+
+  let lat = marker.lat;
+  let lng = marker.lng;
+
+  if ((lat === undefined || lng === undefined) && marker.pos) {
+    if (Array.isArray(marker.pos) && marker.pos.length >= 2) {
+      lat = Number(marker.pos[0]);
+      lng = Number(marker.pos[1]);
+    } else if (
+      typeof marker.pos === "object" &&
+      typeof marker.pos.lat !== "undefined" &&
+      typeof marker.pos.lng !== "undefined"
+    ) {
+      lat = Number(marker.pos.lat);
+      lng = Number(marker.pos.lng);
+    }
   }
 
-  const data = fs.readFileSync(MARKERS_FILE, "utf8");
-  return JSON.parse(data);
+  lat = Number(lat);
+  lng = Number(lng);
 
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+  return {
+    id: String(marker.id || Date.now()),
+    name: String(marker.name || "Unbenannter Marker"),
+    description: String(marker.description || ""),
+    category: String(marker.category || "Dealer"),
+    lat,
+    lng,
+    image: typeof marker.image === "string" ? marker.image : ""
+  };
+}
+
+function loadMarkers() {
+  try {
+    const raw = fs.readFileSync(MARKERS_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(normalizeMarker).filter(Boolean);
+  } catch (error) {
+    console.error("Fehler beim Laden von markers.json:", error.message);
+    return [];
+  }
 }
 
 function saveMarkers(markers) {
-
-  fs.writeFileSync(MARKERS_FILE, JSON.stringify(markers, null, 2));
-
+  const clean = markers.map(normalizeMarker).filter(Boolean);
+  fs.writeFileSync(MARKERS_FILE, JSON.stringify(clean, null, 2), "utf8");
+  return clean;
 }
 
-function posToText(pos) {
-
-  if (Array.isArray(pos) && pos.length === 2) {
-    return `${pos[0].toFixed(2)}, ${pos[1].toFixed(2)}`;
-  }
-
-  if (pos && typeof pos.lat === "number" && typeof pos.lng === "number") {
-    return `${pos.lat.toFixed(2)}, ${pos.lng.toFixed(2)}`;
-  }
-
-  return "unbekannt";
-
+function hasMarkerChanged(a, b) {
+  return (
+    a.name !== b.name ||
+    a.description !== b.description ||
+    a.category !== b.category ||
+    a.lat !== b.lat ||
+    a.lng !== b.lng ||
+    (a.image || "") !== (b.image || "")
+  );
 }
-
-/* ---------------------- Discord Logging ---------------------- */
 
 async function sendDiscordLog(content) {
-
   if (!DISCORD_WEBHOOK_URL) return;
-
   try {
-
-    await axios.post(DISCORD_WEBHOOK_URL, {
-      content: content
-    });
-
+    await axios.post(DISCORD_WEBHOOK_URL, { content });
   } catch (error) {
-
-    console.error("Discord Webhook Fehler:", error);
-
+    console.error("Discord Webhook Fehler:", error.response?.data || error.message);
   }
-
 }
 
-/* ---------------------- Routes ---------------------- */
+app.get("/auth/discord", passport.authenticate("discord"));
 
-app.get("/markers", (req, res) => {
-
-  res.json(loadMarkers());
-
-});
-
-app.post("/markers", async (req, res) => {
-
-  const oldMarkers = loadMarkers();
-  const newMarkers = req.body.markers || [];
-  const adminName = req.body.adminName || "Unbekannt";
-
-  saveMarkers(newMarkers);
-
-  const oldMap = new Map(oldMarkers.map(m => [m.id, m]));
-  const newMap = new Map(newMarkers.map(m => [m.id, m]));
-
-  const added = newMarkers.filter(m => !oldMap.has(m.id));
-  const removed = oldMarkers.filter(m => !newMap.has(m.id));
-
-  for (const marker of added) {
-
-    await sendDiscordLog(
-      `🟢 **${adminName}** hat Marker erstellt: **${marker.name}** | Kategorie: **${marker.category}** | Position: **${posToText(marker.pos)}**`
-    );
-
-  }
-
-  for (const marker of removed) {
-
-    await sendDiscordLog(
-      `🔴 **${adminName}** hat Marker gelöscht: **${marker.name}** | Kategorie: **${marker.category}**`
-    );
-
-  }
-
-  res.json({ success: true });
-
-});
-
-app.post("/upload", upload.single("file"), (req, res) => {
-
-  res.json({ file: req.file.filename });
-
-});
-
-/* ---------------------- Discord Auth ---------------------- */
-
-app.get("/auth/discord",
-  passport.authenticate("discord")
-);
-
-app.get("/auth/discord/callback",
+app.get(
+  "/auth/discord/callback",
   passport.authenticate("discord", { failureRedirect: "/" }),
   (req, res) => {
     res.redirect("/");
   }
 );
 
-/* ---------------------- User API ---------------------- */
+app.get("/logout", (req, res) => {
+  req.logout(() => {
+    req.session.destroy(() => {
+      res.redirect("/");
+    });
+  });
+});
 
 app.get("/api/user", (req, res) => {
-
   if (!req.user) {
-
     return res.json({
-      loggedIn: false
+      loggedIn: false,
+      username: "",
+      isVip: false,
+      isAdmin: false
     });
-
   }
 
   res.json({
     loggedIn: true,
     username: req.user.username,
-    isVip: req.user.isVip || false
+    isVip: !!req.user.isVip,
+    isAdmin: !!req.user.isAdmin
   });
-
 });
 
-/* ---------------------- Server Start ---------------------- */
+app.get("/markers", (req, res) => {
+  res.json(loadMarkers());
+});
+
+app.post("/markers", async (req, res) => {
+  const incoming = Array.isArray(req.body.markers) ? req.body.markers : [];
+  const adminName = req.body.adminName || "Unbekannt";
+
+  const oldMarkers = loadMarkers();
+  const newMarkers = saveMarkers(incoming);
+
+  const oldMap = new Map(oldMarkers.map((m) => [m.id, m]));
+  const newMap = new Map(newMarkers.map((m) => [m.id, m]));
+
+  const added = newMarkers.filter((m) => !oldMap.has(m.id));
+  const removed = oldMarkers.filter((m) => !newMap.has(m.id));
+  const changed = newMarkers.filter((m) => {
+    const oldMarker = oldMap.get(m.id);
+    return oldMarker && hasMarkerChanged(oldMarker, m);
+  });
+
+  for (const marker of added) {
+    await sendDiscordLog(
+      `🟢 **${adminName}** hat Marker erstellt: **${marker.name}** | Kategorie: **${marker.category}** | Koords: **${marker.lat.toFixed(2)}, ${marker.lng.toFixed(2)}**`
+    );
+  }
+
+  for (const marker of removed) {
+    await sendDiscordLog(
+      `🔴 **${adminName}** hat Marker gelöscht: **${marker.name}** | Kategorie: **${marker.category}**`
+    );
+  }
+
+  for (const marker of changed) {
+    await sendDiscordLog(
+      `🟡 **${adminName}** hat Marker geändert: **${marker.name}** | Kategorie: **${marker.category}** | Koords: **${marker.lat.toFixed(2)}, ${marker.lng.toFixed(2)}**`
+    );
+  }
+
+  res.json({ success: true, markers: newMarkers });
+});
+
+app.post("/upload", upload.single("file"), (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: "Keine Datei hochgeladen" });
+  }
+
+  res.json({
+    success: true,
+    file: req.file.filename,
+    path: `screenshots/${req.file.filename}`
+  });
+});
 
 app.listen(PORT, () => {
-
   console.log(`Server läuft auf Port ${PORT}`);
-
 });
