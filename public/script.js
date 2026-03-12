@@ -1,11 +1,15 @@
-const map = L.map("map",{
-crs:L.CRS.Simple,
-minZoom:-2
+const map = L.map("map", {
+  crs: L.CRS.Simple,
+  minZoom: -4,
+  maxZoom: 2
 });
 
-const bounds=[[0,0],[8192,8192]];
+const bounds = [
+  [0, 0],
+  [8192, 8192]
+];
 
-L.imageOverlay("public/GTAV-HD-MAP-satellite.jpg",bounds).addTo(map);
+const image = L.imageOverlay("GTAV-HD-MAP-satellite.jpg", bounds).addTo(map);
 
 map.fitBounds(bounds);
 
@@ -262,4 +266,5 @@ await loadMarkers();
 }
 
 init();
+
 
