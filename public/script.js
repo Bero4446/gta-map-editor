@@ -7,6 +7,28 @@ let markerLayers = [];
 let selectedMarkerId = null;
 let pendingLatLng = null;
 
+const CATEGORY_LABELS = {
+  dealer: "Dealer",
+  felder: "Felder",
+  ugs: "Ugs",
+  yakuza: "Yakuza",
+  lcn: "LCN",
+  ica: "ICA",
+  triaden: "Triaden",
+  sinaloa: "Sinaloa",
+  lsv: "LSV",
+  mg13: "MG13",
+  ballas: "Ballas",
+  midnight: "Midnight",
+  grove: "Grove",
+  rednecks: "Rednecks",
+  "52c": "52c",
+  atlas: "Atlas",
+  lostmc: "Lost MC",
+  adalet: "Adalet",
+  hoh: "HOH"
+};
+
 const adminLoginBtn = document.getElementById("adminLoginBtn");
 const adminStatus = document.getElementById("adminStatus");
 
@@ -26,12 +48,7 @@ const resetFormBtn = document.getElementById("resetFormBtn");
 
 const searchInput = document.getElementById("searchInput");
 const markerList = document.getElementById("markerList");
-
-const statTotal = document.getElementById("statTotal");
-const statDealer = document.getElementById("statDealer");
-const statFraktionen = document.getElementById("statFraktionen");
-const statUgs = document.getElementById("statUgs");
-const statFelder = document.getElementById("statFelder");
+const statsBox = document.getElementById("statsBox");
 
 const categoryCheckboxes = document.querySelectorAll(".categoryCheckbox");
 
@@ -45,43 +62,34 @@ L.imageOverlay("gta-map.jpg", bounds).addTo(map);
 map.fitBounds(bounds);
 
 const icons = {
-  dealer: L.icon({
-    iconUrl: "icons/dealer.png",
-    iconSize: [40, 40],
-    iconAnchor: [20, 40],
-    popupAnchor: [0, -40]
-  }),
-  felder: L.icon({
-    iconUrl: "icons/normal.png",
-    iconSize: [40, 40],
-    iconAnchor: [20, 40],
-    popupAnchor: [0, -40]
-  }),
-  fraktionen: L.icon({
-    iconUrl: "icons/vagos.png",
-    iconSize: [40, 40],
-    iconAnchor: [20, 40],
-    popupAnchor: [0, -40]
-  }),
-  ugs: L.icon({
-    iconUrl: "icons/normal.png",
-    iconSize: [40, 40],
-    iconAnchor: [20, 40],
-    popupAnchor: [0, -40]
-  })
+  dealer: L.icon({ iconUrl: "icons/dealer.png", iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -40] }),
+  felder: L.icon({ iconUrl: "icons/normal.png", iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -40] }),
+  ugs: L.icon({ iconUrl: "icons/normal.png", iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -40] }),
+  yakuza: L.icon({ iconUrl: "icons/normal.png", iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -40] }),
+  lcn: L.icon({ iconUrl: "icons/normal.png", iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -40] }),
+  ica: L.icon({ iconUrl: "icons/normal.png", iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -40] }),
+  triaden: L.icon({ iconUrl: "icons/normal.png", iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -40] }),
+  sinaloa: L.icon({ iconUrl: "icons/normal.png", iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -40] }),
+  lsv: L.icon({ iconUrl: "icons/vagos.png", iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -40] }),
+  mg13: L.icon({ iconUrl: "icons/normal.png", iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -40] }),
+  ballas: L.icon({ iconUrl: "icons/normal.png", iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -40] }),
+  midnight: L.icon({ iconUrl: "icons/normal.png", iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -40] }),
+  grove: L.icon({ iconUrl: "icons/normal.png", iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -40] }),
+  rednecks: L.icon({ iconUrl: "icons/normal.png", iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -40] }),
+  "52c": L.icon({ iconUrl: "icons/normal.png", iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -40] }),
+  atlas: L.icon({ iconUrl: "icons/normal.png", iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -40] }),
+  lostmc: L.icon({ iconUrl: "icons/normal.png", iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -40] }),
+  adalet: L.icon({ iconUrl: "icons/normal.png", iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -40] }),
+  hoh: L.icon({ iconUrl: "icons/normal.png", iconSize: [40, 40], iconAnchor: [20, 40], popupAnchor: [0, -40] })
 };
 
 function updateAdminStatus() {
-  adminStatus.textContent = isAdmin
-    ? `Admin eingeloggt: ${ADMIN_NAME}`
-    : "Nicht eingeloggt";
+  adminStatus.textContent = isAdmin ? `Admin eingeloggt: ${ADMIN_NAME}` : "Nicht eingeloggt";
 }
 
 function normalizePos(pos) {
   if (Array.isArray(pos) && pos.length === 2) return pos;
-  if (pos && typeof pos.lat === "number" && typeof pos.lng === "number") {
-    return [pos.lat, pos.lng];
-  }
+  if (pos && typeof pos.lat === "number" && typeof pos.lng === "number") return [pos.lat, pos.lng];
   return [0, 0];
 }
 
@@ -89,10 +97,12 @@ function getIcon(category) {
   return icons[category] || icons.felder;
 }
 
+function getCategoryLabel(category) {
+  return CATEGORY_LABELS[category] || category;
+}
+
 function getActiveCategories() {
-  return Array.from(categoryCheckboxes)
-    .filter(cb => cb.checked)
-    .map(cb => cb.value);
+  return Array.from(categoryCheckboxes).filter(cb => cb.checked).map(cb => cb.value);
 }
 
 function setPreview(filename = "", localUrl = "") {
@@ -151,7 +161,7 @@ function buildPopup(marker) {
 
   return `
     <b>${marker.name}</b><br>
-    Kategorie: ${marker.category}
+    Kategorie: ${getCategoryLabel(marker.category)}
     ${imageHtml}
   `;
 }
@@ -173,11 +183,20 @@ function getFilteredMarkers() {
 }
 
 function updateStats() {
-  statTotal.textContent = markers.length;
-  statDealer.textContent = markers.filter(m => m.category === "dealer").length;
-  statFraktionen.textContent = markers.filter(m => m.category === "fraktionen").length;
-  statUgs.textContent = markers.filter(m => m.category === "ugs").length;
-  statFelder.textContent = markers.filter(m => m.category === "felder").length;
+  const order = [
+    "dealer", "felder", "ugs", "yakuza", "lcn", "ica", "triaden", "sinaloa",
+    "lsv", "mg13", "ballas", "midnight", "grove", "rednecks", "52c",
+    "atlas", "lostmc", "adalet", "hoh"
+  ];
+
+  let html = `<div>Marker gesamt: <strong>${markers.length}</strong></div>`;
+
+  order.forEach(category => {
+    const count = markers.filter(m => m.category === category).length;
+    html += `<div>${getCategoryLabel(category)}: <strong>${count}</strong></div>`;
+  });
+
+  statsBox.innerHTML = html;
 }
 
 function renderMarkerList() {
@@ -194,7 +213,7 @@ function renderMarkerList() {
     item.className = "marker-item" + (marker.id === selectedMarkerId ? " active" : "");
     item.innerHTML = `
       <div class="marker-item-name">${marker.name}</div>
-      <div class="marker-item-meta">${marker.category}</div>
+      <div class="marker-item-meta">${getCategoryLabel(marker.category)}</div>
     `;
 
     item.addEventListener("click", () => {
