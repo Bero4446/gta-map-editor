@@ -183,6 +183,26 @@ input:focus,select:focus,textarea:focus{
   font-size:13px;
 }
 
+.message-box{
+  margin-bottom:12px;
+  padding:10px 12px;
+  border-radius:10px;
+  font-size:13px;
+  border:1px solid;
+}
+
+.message-success{
+  background:#16281d;
+  border-color:#2f7143;
+  color:#ccf2d7;
+}
+
+.message-error{
+  background:#2a1518;
+  border-color:#8a2f3a;
+  color:#ffd7dd;
+}
+
 .button-row{
   display:flex;
   gap:8px;
