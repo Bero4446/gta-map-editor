@@ -470,6 +470,88 @@ app.post("/markers", requireAdmin, async (req, res) => {
   }
 });
 
+app.get("/api/export-markers", requireAdmin, async (req, res) => {
+  try {
+    const markers = await loadMarkers();
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const filename = `markers-export-${timestamp}.json`;
+
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+
+    res.send(JSON.stringify(markers, null, 2));
+  } catch (error) {
+    console.error("Fehler beim Exportieren der Marker:", error.message);
+    res.status(500).json({
+      success: false,
+      error: "Marker konnten nicht exportiert werden."
+    });
+  }
+});
+
+app.post("/api/import-markers", requireAdmin, async (req, res) => {
+  const incoming =
+    Array.isArray(req.body)
+      ? req.body
+      : Array.isArray(req.body.markers)
+      ? req.body.markers
+      : null;
+
+  if (!incoming) {
+    return res.status(400).json({
+      success: false,
+      error: "Ungültige Daten. Erwartet wird ein Array oder { markers: [...] }."
+    });
+  }
+
+  const cleanMarkers = incoming.map(normalizeMarker).filter(Boolean);
+
+  if (cleanMarkers.length === 0 && incoming.length > 0) {
+    return res.status(400).json({
+      success: false,
+      error: "Es konnten keine gültigen Marker importiert werden."
+    });
+  }
+
+  const adminName = req.user?.username || "Unbekannt";
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+    await client.query("DELETE FROM markers");
+
+    for (const marker of cleanMarkers) {
+      await insertMarker(client, marker);
+    }
+
+    await client.query("COMMIT");
+
+    await sendDiscordLog(
+      `📥 **${adminName}** hat einen Marker-Import ausgeführt. Importierte Marker: **${cleanMarkers.length}**`
+    );
+
+    res.json({
+      success: true,
+      imported: cleanMarkers.length,
+      markers: cleanMarkers
+    });
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch (rollbackError) {
+      console.error("Rollback Fehler:", rollbackError.message);
+    }
+
+    console.error("Fehler beim Importieren der Marker:", error.message);
+    res.status(500).json({
+      success: false,
+      error: "Marker konnten nicht importiert werden."
+    });
+  } finally {
+    client.release();
+  }
+});
+
 app.post("/upload", requireAdmin, (req, res) => {
   upload.single("file")(req, res, (error) => {
     if (error) {
