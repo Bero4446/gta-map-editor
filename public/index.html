@@ -32,6 +32,7 @@
         <button class="tab active" data-tab="filter">Filter</button>
         <button class="tab" data-tab="stats">Statistik</button>
         <button class="tab admin-only hidden" data-tab="export">Export</button>
+        <button class="tab admin-only hidden" data-tab="history">Verlauf</button>
         <button class="tab vip-only hidden" data-tab="vip">VIP</button>
       </div>
 
@@ -61,6 +62,13 @@
           <option value="Workstation">🖥️ Workstation</option>
           <option value="Schwarzmarkt">🕶 Schwarzmarkt</option>
         </select>
+
+        <input id="markerOwner" placeholder="Besitzer / Zuständigkeit (nur Admin sichtbar)" />
+
+        <label class="check">
+          <input type="checkbox" id="markerFavorite" />
+          ⭐ Als Favorit markieren
+        </label>
 
         <div class="coord-row">
           <input id="markerLat" placeholder="Lat" />
@@ -110,12 +118,18 @@
           <input type="checkbox" checked data-filter="Schwarzmarkt" />
           🕶 Schwarzmarkt
         </label>
+
+        <label class="check">
+          <input type="checkbox" id="favoritesOnly" />
+          ⭐ Nur Favoriten anzeigen
+        </label>
       </div>
 
       <div class="tab-content" id="stats">
         <h2>Statistik</h2>
 
-        <div id="statTotal" class="stat-card">Marker: 0</div>
+        <div id="statTotal" class="stat-card">Marker sichtbar: 0</div>
+        <div id="statFavorites" class="stat-card">Favoriten: 0</div>
         <div id="statDealer" class="stat-card">Dealer: 0</div>
         <div id="statUG" class="stat-card">UG: 0</div>
         <div id="statField" class="stat-card">Felder: 0</div>
@@ -124,15 +138,39 @@
       </div>
 
       <div class="tab-content admin-only hidden" id="export">
-        <h2>Export</h2>
+        <h2>Export &amp; Import</h2>
 
         <div class="status-box">
-          Hier kannst du alle Marker oder nur die aktuell sichtbaren Marker exportieren.
+          Hier kannst du Marker exportieren und JSON-Dateien direkt wieder importieren.
         </div>
 
         <div class="button-column">
           <button id="exportAllBtn">Alle Marker exportieren</button>
           <button id="exportVisibleBtn" class="secondary">Sichtbare Marker exportieren</button>
+        </div>
+
+        <hr>
+
+        <div class="status-box">
+          Import überschreibt den aktuellen Datenbestand vollständig.
+        </div>
+
+        <input type="file" id="importFile" accept="application/json,.json" />
+
+        <div class="button-row">
+          <button id="importMarkersBtn">Import starten</button>
+        </div>
+      </div>
+
+      <div class="tab-content admin-only hidden" id="history">
+        <h2 id="historyTitle">Verlauf</h2>
+
+        <div id="historyHint" class="status-box">
+          Wähle einen Marker aus, um seinen Verlauf zu sehen.
+        </div>
+
+        <div id="historyList">
+          <div class="status-box">Noch kein Marker ausgewählt.</div>
         </div>
       </div>
 
