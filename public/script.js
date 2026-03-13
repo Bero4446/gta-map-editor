@@ -45,6 +45,20 @@ function createEmojiIcon(emoji) {
   });
 }
 
+function showMessage(text, type = "success") {
+  const box = document.getElementById("appMessage");
+  if (!box) return;
+
+  box.textContent = text;
+  box.classList.remove("hidden", "message-success", "message-error");
+  box.classList.add(type === "error" ? "message-error" : "message-success");
+
+  clearTimeout(showMessage.timeout);
+  showMessage.timeout = setTimeout(() => {
+    box.classList.add("hidden");
+  }, 3500);
+}
+
 function getActiveFilters() {
   return Array.from(document.querySelectorAll("[data-filter]:checked")).map((el) => el.dataset.filter);
 }
@@ -166,10 +180,16 @@ function updateUserUi() {
 }
 
 async function loadMarkers() {
-  const res = await fetch("/markers");
-  markers = await res.json();
-  renderMarkers();
-  updateStats();
+  try {
+    const res = await fetch("/markers");
+    if (!res.ok) throw new Error("Marker konnten nicht geladen werden.");
+    markers = await res.json();
+    renderMarkers();
+    updateStats();
+  } catch (error) {
+    console.error(error);
+    showMessage("Marker konnten nicht geladen werden.", "error");
+  }
 }
 
 async function saveMarkers() {
@@ -185,6 +205,11 @@ async function saveMarkers() {
   });
 
   const data = await response.json();
+
+  if (!response.ok || data.success === false) {
+    throw new Error(data.error || "Marker konnten nicht gespeichert werden.");
+  }
+
   if (data.markers) {
     markers = data.markers;
   }
@@ -259,13 +284,19 @@ function renderMarkers() {
     layer.on("dragend", async (e) => {
       if (!isAdmin()) return;
 
-      const pos = e.target.getLatLng();
-      marker.lat = roundCoord(pos.lat);
-      marker.lng = roundCoord(pos.lng);
+      try {
+        const pos = e.target.getLatLng();
+        marker.lat = roundCoord(pos.lat);
+        marker.lng = roundCoord(pos.lng);
 
-      await saveMarkers();
-      updateStats();
-      renderMarkers();
+        await saveMarkers();
+        updateStats();
+        renderMarkers();
+        showMessage("Marker verschoben und gespeichert.");
+      } catch (error) {
+        console.error(error);
+        showMessage("Marker konnte nicht verschoben werden.", "error");
+      }
     });
 
     markerLayers.push(layer);
@@ -307,6 +338,11 @@ async function uploadImageIfNeeded() {
   });
 
   const data = await res.json();
+
+  if (!res.ok || data.success === false) {
+    throw new Error(data.error || "Bild konnte nicht hochgeladen werden.");
+  }
+
   return data.path || "";
 }
 
@@ -349,7 +385,7 @@ window.closeImageModal = function () {
 
 async function handleSaveMarker() {
   if (!isAdmin()) {
-    alert("Nur Admins dürfen Marker erstellen oder bearbeiten.");
+    showMessage("Nur Admins dürfen Marker erstellen oder bearbeiten.", "error");
     return;
   }
 
@@ -359,52 +395,61 @@ async function handleSaveMarker() {
   const lat = Number(document.getElementById("markerLat").value);
   const lng = Number(document.getElementById("markerLng").value);
 
-  if (!name || !Number.isFinite(lat) || !Number.isFinite(lng)) {
-    alert("Bitte Name und gültige Koordinaten eingeben.");
+  if (!name) {
+    showMessage("Bitte einen Namen für den Marker eingeben.", "error");
     return;
   }
 
-  let imagePath = null;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    showMessage("Bitte gültige Koordinaten eingeben.", "error");
+    return;
+  }
+
   try {
-    imagePath = await uploadImageIfNeeded();
+    const imagePath = await uploadImageIfNeeded();
+
+    if (selectedMarkerId) {
+      const marker = markers.find((m) => m.id === selectedMarkerId);
+      if (!marker) throw new Error("Marker wurde nicht gefunden.");
+
+      marker.name = name;
+      marker.description = description;
+      marker.category = category;
+      marker.lat = roundCoord(lat);
+      marker.lng = roundCoord(lng);
+      if (imagePath) marker.image = imagePath;
+      marker.updatedAt = new Date().toISOString();
+    } else {
+      markers.push({
+        id: String(Date.now()),
+        name,
+        description,
+        category,
+        lat: roundCoord(lat),
+        lng: roundCoord(lng),
+        image: imagePath || "",
+        updatedAt: new Date().toISOString()
+      });
+    }
+
+    await saveMarkers();
+    clearForm();
+    renderMarkers();
+    updateStats();
+    showMessage(selectedMarkerId ? "Marker gespeichert." : "Marker erstellt.");
   } catch (error) {
-    console.error("Upload Fehler:", error);
-    alert("Bild konnte nicht hochgeladen werden.");
-    return;
+    console.error(error);
+    showMessage(error.message || "Marker konnte nicht gespeichert werden.", "error");
   }
-
-  if (selectedMarkerId) {
-    const marker = markers.find((m) => m.id === selectedMarkerId);
-    if (!marker) return;
-
-    marker.name = name;
-    marker.description = description;
-    marker.category = category;
-    marker.lat = roundCoord(lat);
-    marker.lng = roundCoord(lng);
-    if (imagePath) marker.image = imagePath;
-  } else {
-    markers.push({
-      id: String(Date.now()),
-      name,
-      description,
-      category,
-      lat: roundCoord(lat),
-      lng: roundCoord(lng),
-      image: imagePath || ""
-    });
-  }
-
-  await saveMarkers();
-  clearForm();
-  renderMarkers();
-  updateStats();
 }
 
 window.editMarker = function (id) {
   if (!isAdmin()) return;
   const marker = markers.find((m) => m.id === id);
-  if (!marker) return;
+  if (!marker) {
+    showMessage("Marker konnte nicht geladen werden.", "error");
+    return;
+  }
 
   fillForm(marker);
 
@@ -412,17 +457,25 @@ window.editMarker = function (id) {
   document.querySelectorAll(".tab-content").forEach((c) => c.classList.remove("active"));
   document.querySelector('[data-tab="editor"]')?.classList.add("active");
   document.getElementById("editor")?.classList.add("active");
+
+  showMessage("Marker zum Bearbeiten geladen.");
 };
 
 window.deleteMarker = async function (id) {
   if (!isAdmin()) return;
   if (!confirm("Marker wirklich löschen?")) return;
 
-  markers = markers.filter((m) => m.id !== id);
-  await saveMarkers();
-  clearForm();
-  renderMarkers();
-  updateStats();
+  try {
+    markers = markers.filter((m) => m.id !== id);
+    await saveMarkers();
+    clearForm();
+    renderMarkers();
+    updateStats();
+    showMessage("Marker gelöscht.");
+  } catch (error) {
+    console.error(error);
+    showMessage("Marker konnte nicht gelöscht werden.", "error");
+  }
 };
 
 map.on("click", (e) => {
@@ -437,7 +490,10 @@ map.on("click", (e) => {
 });
 
 document.getElementById("saveMarker")?.addEventListener("click", handleSaveMarker);
-document.getElementById("clearForm")?.addEventListener("click", clearForm);
+document.getElementById("clearForm")?.addEventListener("click", () => {
+  clearForm();
+  showMessage("Formular geleert.");
+});
 
 document.getElementById("markerSearch")?.addEventListener("input", () => {
   const search = document.getElementById("markerSearch").value.trim().toLowerCase();
