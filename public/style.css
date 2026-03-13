@@ -39,6 +39,7 @@ body{
   display:flex;
   align-items:center;
   gap:8px;
+  flex-wrap:wrap;
 }
 
 #loginStatus{
@@ -73,7 +74,7 @@ body{
   padding:18px;
   box-shadow:0 20px 60px rgba(0,0,0,0.45);
   backdrop-filter:blur(12px);
-  transition:right 0.25s ease, opacity 0.25s ease;
+  transition:right 0.25s ease, opacity 0.25s ease, bottom 0.25s ease;
 }
 
 #panel.collapsed{
@@ -206,6 +207,13 @@ input:focus,select:focus,textarea:focus{
 .button-row{
   display:flex;
   gap:8px;
+  flex-wrap:wrap;
+}
+
+.button-column{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
 }
 
 button{
@@ -329,6 +337,7 @@ button.secondary:hover{
   display:flex;
   gap:8px;
   margin-top:12px;
+  flex-wrap:wrap;
 }
 
 .image-modal{
@@ -372,4 +381,74 @@ button.secondary:hover{
 
 .hidden{
   display:none !important;
+}
+
+@media (max-width: 900px){
+  #panel{
+    width:320px;
+  }
+
+  #panel.collapsed{
+    right:-290px;
+  }
+}
+
+@media (max-width: 640px){
+  .topbar{
+    height:auto;
+    min-height:60px;
+    padding:10px 12px;
+    align-items:flex-start;
+    flex-direction:column;
+    gap:8px;
+  }
+
+  #mapWrap{
+    height:calc(100vh - 84px);
+  }
+
+  #panel{
+    top:auto;
+    right:10px;
+    left:10px;
+    bottom:10px;
+    width:auto;
+    max-height:50vh;
+    border-radius:16px;
+  }
+
+  #panel.collapsed{
+    right:10px;
+    left:10px;
+    bottom:-46vh;
+  }
+
+  #panelToggle{
+    left:auto;
+    right:12px;
+    top:-42px;
+    border-radius:12px 12px 0 0;
+    border-right:1px solid rgba(79,88,109,0.45);
+  }
+
+  .tabs{
+    gap:6px;
+  }
+
+  .tab{
+    flex:1 1 calc(50% - 6px);
+    text-align:center;
+  }
+
+  .coord-row{
+    grid-template-columns:1fr;
+  }
+
+  .button-row{
+    flex-direction:column;
+  }
+
+  .popup-actions{
+    flex-direction:column;
+  }
 }
