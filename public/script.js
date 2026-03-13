@@ -76,6 +76,10 @@ function shouldShowMarker(marker) {
   return text.includes(searchValue);
 }
 
+function getVisibleMarkers() {
+  return markers.filter((marker) => shouldShowMarker(marker));
+}
+
 function isAdmin() {
   return !!currentUser.isAdmin;
 }
@@ -255,14 +259,13 @@ function renderMarkers() {
       </div>
     `;
 
-    const adminActions = isAdmin()
-      ? `
-        <div class="popup-actions">
-          <button onclick="window.editMarker('${marker.id}')">Bearbeiten</button>
-          <button class="secondary" onclick="window.deleteMarker('${marker.id}')">Löschen</button>
-        </div>
-      `
-      : "";
+    const copyCoordsBtn = `
+      <div class="popup-actions">
+        <button onclick="window.copyMarkerCoords('${marker.id}')">Koords kopieren</button>
+        ${isAdmin() ? `<button onclick="window.editMarker('${marker.id}')">Bearbeiten</button>` : ""}
+        ${isAdmin() ? `<button class="secondary" onclick="window.deleteMarker('${marker.id}')">Löschen</button>` : ""}
+      </div>
+    `;
 
     layer.bindPopup(`
       <div>
@@ -271,7 +274,7 @@ function renderMarkers() {
         ${descriptionHtml}
         ${popupMeta}
         ${imageHtml}
-        ${adminActions}
+        ${copyCoordsBtn}
       </div>
     `);
 
@@ -304,7 +307,7 @@ function renderMarkers() {
 }
 
 function updateStats() {
-  const visible = markers.filter((m) => shouldShowMarker(m));
+  const visible = getVisibleMarkers();
   const vipVisible = markers.filter(
     (m) => m.category === "Schwarzmarkt" && isVipOrAdmin()
   );
@@ -365,6 +368,25 @@ function escapeJsString(str) {
     .replaceAll("'", "\\'");
 }
 
+async function copyToClipboard(text, successText = "Kopiert.") {
+  try {
+    await navigator.clipboard.writeText(text);
+    showMessage(successText);
+  } catch {
+    showMessage("Kopieren nicht möglich.", "error");
+  }
+}
+
+window.copyMarkerCoords = function (id) {
+  const marker = markers.find((m) => m.id === id);
+  if (!marker) {
+    showMessage("Marker nicht gefunden.", "error");
+    return;
+  }
+
+  copyToClipboard(`${marker.lat}, ${marker.lng}`, "Marker-Koordinaten kopiert.");
+};
+
 window.openImageModal = function (src) {
   const modal = document.getElementById("imageModal");
   const modalImage = document.getElementById("modalImage");
@@ -382,6 +404,18 @@ window.closeImageModal = function () {
   modal.classList.add("hidden");
   modalImage.src = "";
 };
+
+function downloadJson(filename, data) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
 
 async function handleSaveMarker() {
   if (!isAdmin()) {
@@ -407,6 +441,7 @@ async function handleSaveMarker() {
 
   try {
     const imagePath = await uploadImageIfNeeded();
+    const wasEditing = !!selectedMarkerId;
 
     if (selectedMarkerId) {
       const marker = markers.find((m) => m.id === selectedMarkerId);
@@ -436,7 +471,7 @@ async function handleSaveMarker() {
     clearForm();
     renderMarkers();
     updateStats();
-    showMessage(selectedMarkerId ? "Marker gespeichert." : "Marker erstellt.");
+    showMessage(wasEditing ? "Marker gespeichert." : "Marker erstellt.");
   } catch (error) {
     console.error(error);
     showMessage(error.message || "Marker konnte nicht gespeichert werden.", "error");
@@ -490,9 +525,32 @@ map.on("click", (e) => {
 });
 
 document.getElementById("saveMarker")?.addEventListener("click", handleSaveMarker);
+
 document.getElementById("clearForm")?.addEventListener("click", () => {
   clearForm();
   showMessage("Formular geleert.");
+});
+
+document.getElementById("copyCoordsBtn")?.addEventListener("click", () => {
+  const lat = document.getElementById("markerLat").value.trim();
+  const lng = document.getElementById("markerLng").value.trim();
+
+  if (!lat || !lng) {
+    showMessage("Keine Koordinaten zum Kopieren vorhanden.", "error");
+    return;
+  }
+
+  copyToClipboard(`${lat}, ${lng}`, "Koordinaten kopiert.");
+});
+
+document.getElementById("exportAllBtn")?.addEventListener("click", () => {
+  downloadJson("markers-all.json", markers);
+  showMessage("Alle Marker exportiert.");
+});
+
+document.getElementById("exportVisibleBtn")?.addEventListener("click", () => {
+  downloadJson("markers-visible.json", getVisibleMarkers());
+  showMessage("Sichtbare Marker exportiert.");
 });
 
 document.getElementById("markerSearch")?.addEventListener("input", () => {
