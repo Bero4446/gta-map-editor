@@ -51,6 +51,7 @@
           <option value="Dealer">💊 Dealer</option>
           <option value="UG">🔫 UG</option>
           <option value="Feld">🌿 Feld</option>
+          <option value="Workstation">🖥️ Workstation</option>
           <option value="Schwarzmarkt">🕶 Schwarzmarkt</option>
         </select>
 
@@ -89,6 +90,11 @@
           🌿 Feld
         </label>
 
+        <label class="check">
+          <input type="checkbox" checked data-filter="Workstation" />
+          🖥️ Workstation
+        </label>
+
         <label class="check vip-only hidden">
           <input type="checkbox" checked data-filter="Schwarzmarkt" />
           🕶 Schwarzmarkt
@@ -102,6 +108,7 @@
         <div id="statDealer" class="stat-card">Dealer: 0</div>
         <div id="statUG" class="stat-card">UG: 0</div>
         <div id="statField" class="stat-card">Felder: 0</div>
+        <div id="statWorkstation" class="stat-card">Workstations: 0</div>
         <div id="statVip" class="stat-card vip-only hidden">Schwarzmarkt: 0</div>
       </div>
 
@@ -112,6 +119,12 @@
         </div>
       </div>
     </div>
+  </div>
+
+  <div id="imageModal" class="image-modal hidden">
+    <div class="image-modal-backdrop"></div>
+    <img id="modalImage" class="image-modal-img" src="" alt="Vergrößertes Bild" />
+    <button id="closeImageModal" class="image-modal-close">✕</button>
   </div>
 
   <script src="script.js"></script>
