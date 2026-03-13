@@ -30,26 +30,14 @@ const icons = {
   Dealer: createEmojiIcon("💊"),
   UG: createEmojiIcon("🔫"),
   Feld: createEmojiIcon("🌿"),
+  Workstation: createEmojiIcon("🖥️"),
   Schwarzmarkt: createEmojiIcon("🕶")
 };
 
 function createEmojiIcon(emoji) {
   return L.divIcon({
-    className: "",
-    html: `
-      <div style="
-        width: 34px;
-        height: 34px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 28px;
-        line-height: 34px;
-        text-shadow: 0 2px 8px rgba(0,0,0,0.85);
-      ">
-        ${emoji}
-      </div>
-    `,
+    className: "emoji-div-icon",
+    html: `<div class="emoji-marker">${emoji}</div>`,
     iconSize: [34, 34],
     iconAnchor: [17, 17],
     popupAnchor: [0, -14],
@@ -209,7 +197,15 @@ function renderMarkers() {
       : "";
 
     const imageHtml = marker.image
-      ? `<img class="popup-image" src="${escapeHtml(marker.image)}" alt="Marker Screenshot">`
+      ? `
+        <img
+          class="popup-image"
+          src="${escapeHtml(marker.image)}"
+          alt="Marker Screenshot"
+          ondblclick="window.openImageModal('${escapeJsString(marker.image)}')"
+        >
+        <div class="popup-hint">Doppelklick auf das Bild zum Vergrößern</div>
+      `
       : "";
 
     const adminActions = currentUser.isAdmin
@@ -223,13 +219,19 @@ function renderMarkers() {
 
     layer.bindPopup(`
       <div>
-        <strong>${escapeHtml(marker.name)}</strong><br>
-        Kategorie: ${escapeHtml(marker.category)}
+        <div class="popup-title">${escapeHtml(marker.name)}</div>
+        <div class="popup-category">Kategorie: ${escapeHtml(marker.category)}</div>
         ${descriptionHtml}
         ${imageHtml}
         ${adminActions}
       </div>
     `);
+
+    layer.on("click", () => {
+      map.flyTo([Number(marker.lat), Number(marker.lng)], Math.max(map.getZoom(), -1.5), {
+        duration: 0.5
+      });
+    });
 
     layer.on("dragend", async (e) => {
       if (!currentUser.isAdmin) return;
@@ -257,12 +259,14 @@ function updateStats() {
   const statDealer = document.getElementById("statDealer");
   const statUG = document.getElementById("statUG");
   const statField = document.getElementById("statField");
+  const statWorkstation = document.getElementById("statWorkstation");
   const statVip = document.getElementById("statVip");
 
   if (statTotal) statTotal.textContent = `Marker: ${visible.length}`;
   if (statDealer) statDealer.textContent = `Dealer: ${markers.filter((m) => m.category === "Dealer").length}`;
   if (statUG) statUG.textContent = `UG: ${markers.filter((m) => m.category === "UG").length}`;
   if (statField) statField.textContent = `Felder: ${markers.filter((m) => m.category === "Feld").length}`;
+  if (statWorkstation) statWorkstation.textContent = `Workstations: ${markers.filter((m) => m.category === "Workstation").length}`;
   if (statVip) statVip.textContent = `Schwarzmarkt: ${vipVisible.length}`;
 }
 
@@ -295,6 +299,30 @@ function escapeHtml(str) {
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
 }
+
+function escapeJsString(str) {
+  return String(str)
+    .replaceAll("\\", "\\\\")
+    .replaceAll("'", "\\'");
+}
+
+window.openImageModal = function (src) {
+  const modal = document.getElementById("imageModal");
+  const modalImage = document.getElementById("modalImage");
+  if (!modal || !modalImage) return;
+
+  modalImage.src = src;
+  modal.classList.remove("hidden");
+};
+
+window.closeImageModal = function () {
+  const modal = document.getElementById("imageModal");
+  const modalImage = document.getElementById("modalImage");
+  if (!modal || !modalImage) return;
+
+  modal.classList.add("hidden");
+  modalImage.src = "";
+};
 
 async function handleSaveMarker() {
   if (!currentUser.isAdmin) {
@@ -389,8 +417,24 @@ document.getElementById("saveMarker")?.addEventListener("click", handleSaveMarke
 document.getElementById("clearForm")?.addEventListener("click", clearForm);
 
 document.getElementById("markerSearch")?.addEventListener("input", () => {
+  const search = document.getElementById("markerSearch").value.trim().toLowerCase();
+
   renderMarkers();
   updateStats();
+
+  if (!search) return;
+
+  const found = markers.find((marker) => {
+    if (marker.category === "Schwarzmarkt" && !(currentUser.isVip || currentUser.isAdmin)) return false;
+    const text = `${marker.name} ${marker.description} ${marker.category}`.toLowerCase();
+    return text.includes(search);
+  });
+
+  if (found) {
+    map.flyTo([Number(found.lat), Number(found.lng)], Math.max(map.getZoom(), -1.25), {
+      duration: 0.6
+    });
+  }
 });
 
 document.querySelectorAll("[data-filter]").forEach((checkbox) => {
@@ -420,6 +464,20 @@ document.getElementById("discordLogin")?.addEventListener("click", () => {
 
 document.getElementById("logoutBtn")?.addEventListener("click", () => {
   window.location.href = "/logout";
+});
+
+document.getElementById("closeImageModal")?.addEventListener("click", () => {
+  window.closeImageModal();
+});
+
+document.querySelector(".image-modal-backdrop")?.addEventListener("click", () => {
+  window.closeImageModal();
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    window.closeImageModal();
+  }
 });
 
 async function init() {
