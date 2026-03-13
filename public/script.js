@@ -62,6 +62,14 @@ function shouldShowMarker(marker) {
   return text.includes(searchValue);
 }
 
+function isAdmin() {
+  return !!currentUser.isAdmin;
+}
+
+function isVipOrAdmin() {
+  return !!currentUser.isVip || !!currentUser.isAdmin;
+}
+
 function clearForm() {
   selectedMarkerId = null;
   document.getElementById("markerName").value = "";
@@ -71,6 +79,10 @@ function clearForm() {
   document.getElementById("markerLng").value = "";
   const img = document.getElementById("markerImage");
   if (img) img.value = "";
+
+  const editModeInfo = document.getElementById("editModeInfo");
+  if (editModeInfo) editModeInfo.classList.add("hidden");
+
   updateUserUi();
 }
 
@@ -81,6 +93,10 @@ function fillForm(marker) {
   document.getElementById("markerCategory").value = marker.category || "Dealer";
   document.getElementById("markerLat").value = marker.lat;
   document.getElementById("markerLng").value = marker.lng;
+
+  const editModeInfo = document.getElementById("editModeInfo");
+  if (editModeInfo) editModeInfo.classList.remove("hidden");
+
   updateUserUi();
 }
 
@@ -132,14 +148,14 @@ function updateUserUi() {
 
   if (logoutBtn) logoutBtn.classList.remove("hidden");
 
-  if (currentUser.isVip || currentUser.isAdmin) {
+  if (isVipOrAdmin()) {
     vipElements.forEach((el) => el.classList.remove("hidden"));
   } else {
     vipElements.forEach((el) => el.classList.add("hidden"));
   }
 
   if (saveButton) {
-    if (currentUser.isAdmin) {
+    if (isAdmin()) {
       saveButton.disabled = false;
       saveButton.textContent = selectedMarkerId ? "Änderungen speichern" : "Speichern";
     } else {
@@ -183,7 +199,7 @@ function renderMarkers() {
 
     const layer = L.marker([Number(marker.lat), Number(marker.lng)], {
       icon: icons[marker.category] || icons.Dealer,
-      draggable: !!currentUser.isAdmin,
+      draggable: isAdmin(),
       title: marker.name
     }).addTo(map);
 
@@ -194,7 +210,7 @@ function renderMarkers() {
 
     const descriptionHtml = marker.description
       ? `<div class="popup-desc">${escapeHtml(marker.description).replace(/\n/g, "<br>")}</div>`
-      : "";
+      : `<div class="popup-desc">Keine Beschreibung vorhanden.</div>`;
 
     const imageHtml = marker.image
       ? `
@@ -208,7 +224,13 @@ function renderMarkers() {
       `
       : "";
 
-    const adminActions = currentUser.isAdmin
+    const popupMeta = `
+      <div class="popup-meta">
+        Lat: ${Number(marker.lat).toFixed(2)} | Lng: ${Number(marker.lng).toFixed(2)}
+      </div>
+    `;
+
+    const adminActions = isAdmin()
       ? `
         <div class="popup-actions">
           <button onclick="window.editMarker('${marker.id}')">Bearbeiten</button>
@@ -222,6 +244,7 @@ function renderMarkers() {
         <div class="popup-title">${escapeHtml(marker.name)}</div>
         <div class="popup-category">Kategorie: ${escapeHtml(marker.category)}</div>
         ${descriptionHtml}
+        ${popupMeta}
         ${imageHtml}
         ${adminActions}
       </div>
@@ -229,12 +252,12 @@ function renderMarkers() {
 
     layer.on("click", () => {
       map.flyTo([Number(marker.lat), Number(marker.lng)], Math.max(map.getZoom(), -1.5), {
-        duration: 0.5
+        duration: 0.45
       });
     });
 
     layer.on("dragend", async (e) => {
-      if (!currentUser.isAdmin) return;
+      if (!isAdmin()) return;
 
       const pos = e.target.getLatLng();
       marker.lat = roundCoord(pos.lat);
@@ -252,7 +275,7 @@ function renderMarkers() {
 function updateStats() {
   const visible = markers.filter((m) => shouldShowMarker(m));
   const vipVisible = markers.filter(
-    (m) => m.category === "Schwarzmarkt" && (currentUser.isVip || currentUser.isAdmin)
+    (m) => m.category === "Schwarzmarkt" && isVipOrAdmin()
   );
 
   const statTotal = document.getElementById("statTotal");
@@ -325,7 +348,7 @@ window.closeImageModal = function () {
 };
 
 async function handleSaveMarker() {
-  if (!currentUser.isAdmin) {
+  if (!isAdmin()) {
     alert("Nur Admins dürfen Marker erstellen oder bearbeiten.");
     return;
   }
@@ -379,7 +402,7 @@ async function handleSaveMarker() {
 }
 
 window.editMarker = function (id) {
-  if (!currentUser.isAdmin) return;
+  if (!isAdmin()) return;
   const marker = markers.find((m) => m.id === id);
   if (!marker) return;
 
@@ -392,7 +415,7 @@ window.editMarker = function (id) {
 };
 
 window.deleteMarker = async function (id) {
-  if (!currentUser.isAdmin) return;
+  if (!isAdmin()) return;
   if (!confirm("Marker wirklich löschen?")) return;
 
   markers = markers.filter((m) => m.id !== id);
@@ -425,7 +448,7 @@ document.getElementById("markerSearch")?.addEventListener("input", () => {
   if (!search) return;
 
   const found = markers.find((marker) => {
-    if (marker.category === "Schwarzmarkt" && !(currentUser.isVip || currentUser.isAdmin)) return false;
+    if (marker.category === "Schwarzmarkt" && !isVipOrAdmin()) return false;
     const text = `${marker.name} ${marker.description} ${marker.category}`.toLowerCase();
     return text.includes(search);
   });
