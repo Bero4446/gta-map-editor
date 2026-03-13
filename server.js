@@ -1,39 +1,52 @@
 const express = require("express");
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const session = require("express-session");
 const passport = require("passport");
 const DiscordStrategy = require("passport-discord").Strategy;
 const axios = require("axios");
 const multer = require("multer");
+const { Pool } = require("pg");
 
 const app = express();
+app.set("trust proxy", 1);
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, "public");
-const SCREENSHOT_DIR = path.join(PUBLIC_DIR, "screenshots");
-const BACKUP_DIR = path.join(__dirname, "backups");
 const MARKERS_FILE = path.join(__dirname, "markers.json");
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL || "";
+const DATABASE_URL = process.env.DATABASE_URL;
+
+const ALLOWED_CATEGORIES = [
+  "Dealer",
+  "UG",
+  "Feld",
+  "Workstation",
+  "Schwarzmarkt"
+];
 
 if (!fs.existsSync(PUBLIC_DIR)) {
   fs.mkdirSync(PUBLIC_DIR, { recursive: true });
 }
 
-if (!fs.existsSync(SCREENSHOT_DIR)) {
-  fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
+if (!DATABASE_URL) {
+  console.error("DATABASE_URL fehlt. Bitte in Render die Postgres-Verbindung als Umgebungsvariable setzen.");
+  process.exit(1);
 }
 
-if (!fs.existsSync(BACKUP_DIR)) {
-  fs.mkdirSync(BACKUP_DIR, { recursive: true });
-}
+const pool = new Pool({
+  connectionString: DATABASE_URL,
+  max: 10,
+  idleTimeoutMillis: 30000
+});
 
-if (!fs.existsSync(MARKERS_FILE)) {
-  fs.writeFileSync(MARKERS_FILE, "[]", "utf8");
-}
+pool.on("error", (error) => {
+  console.error("Postgres Pool Fehler:", error.message);
+});
 
-app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 app.use(express.static(PUBLIC_DIR));
 
 app.use(
@@ -43,7 +56,8 @@ app.use(
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
-      sameSite: "lax"
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production"
     }
   })
 );
@@ -106,17 +120,19 @@ passport.use(
   )
 );
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, SCREENSHOT_DIR);
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 5 * 1024 * 1024
   },
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname || "").toLowerCase() || ".jpg";
-    cb(null, `${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`);
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype && file.mimetype.startsWith("image/")) {
+      return cb(null, true);
+    }
+
+    cb(new Error("Nur Bilddateien sind erlaubt."));
   }
 });
-
-const upload = multer({ storage });
 
 function normalizeMarker(marker) {
   if (!marker || typeof marker !== "object") return null;
@@ -145,11 +161,10 @@ function normalizeMarker(marker) {
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
 
   const category = String(marker.category || "Dealer");
-  const allowedCategories = ["Dealer", "UG", "Feld", "Workstation", "Schwarzmarkt"];
-  const safeCategory = allowedCategories.includes(category) ? category : "Dealer";
+  const safeCategory = ALLOWED_CATEGORIES.includes(category) ? category : "Dealer";
 
   return {
-    id: String(marker.id || Date.now()),
+    id: String(marker.id || crypto.randomUUID()),
     name: String(marker.name || "Unbenannter Marker").trim(),
     description: String(marker.description || "").trim(),
     category: safeCategory,
@@ -160,8 +175,43 @@ function normalizeMarker(marker) {
   };
 }
 
-function loadMarkers() {
+function rowToMarker(row) {
+  return {
+    id: String(row.id),
+    name: String(row.name || "Unbenannter Marker"),
+    description: String(row.description || ""),
+    category: String(row.category || "Dealer"),
+    lat: Number(row.lat),
+    lng: Number(row.lng),
+    image: typeof row.image === "string" ? row.image : "",
+    updatedAt: row.updated_at
+      ? new Date(row.updated_at).toISOString()
+      : new Date().toISOString()
+  };
+}
+
+function filterMarkersForUser(markers, user) {
+  const canSeeBlackMarket = !!user && (user.isVip || user.isAdmin);
+  return markers.filter((marker) => canSeeBlackMarket || marker.category !== "Schwarzmarkt");
+}
+
+function hasMarkerChanged(oldMarker, newMarker) {
+  return (
+    oldMarker.name !== newMarker.name ||
+    oldMarker.description !== newMarker.description ||
+    oldMarker.category !== newMarker.category ||
+    oldMarker.lat !== newMarker.lat ||
+    oldMarker.lng !== newMarker.lng ||
+    (oldMarker.image || "") !== (newMarker.image || "")
+  );
+}
+
+function loadMarkersFromJson() {
   try {
+    if (!fs.existsSync(MARKERS_FILE)) {
+      return [];
+    }
+
     const raw = fs.readFileSync(MARKERS_FILE, "utf8");
     const parsed = JSON.parse(raw);
 
@@ -176,44 +226,95 @@ function loadMarkers() {
   }
 }
 
-function createBackup() {
-  try {
-    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const backupFile = path.join(BACKUP_DIR, `markers-backup-${timestamp}.json`);
-    fs.copyFileSync(MARKERS_FILE, backupFile);
+async function createMarkersTable() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS markers (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      category TEXT NOT NULL,
+      lat DOUBLE PRECISION NOT NULL,
+      lng DOUBLE PRECISION NOT NULL,
+      image TEXT NOT NULL DEFAULT '',
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
 
-    const files = fs
-      .readdirSync(BACKUP_DIR)
-      .filter((file) => file.endsWith(".json"))
-      .sort();
-
-    if (files.length > 10) {
-      const filesToDelete = files.slice(0, files.length - 10);
-      for (const file of filesToDelete) {
-        fs.unlinkSync(path.join(BACKUP_DIR, file));
-      }
-    }
-  } catch (error) {
-    console.error("Backup Fehler:", error.message);
-  }
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_markers_category ON markers(category)
+  `);
 }
 
-function saveMarkers(markers) {
-  const cleanMarkers = markers.map(normalizeMarker).filter(Boolean);
-  createBackup();
-  fs.writeFileSync(MARKERS_FILE, JSON.stringify(cleanMarkers, null, 2), "utf8");
-  return cleanMarkers;
+async function getMarkerCount() {
+  const result = await pool.query(`
+    SELECT COUNT(*)::int AS count
+    FROM markers
+  `);
+
+  return Number(result.rows[0]?.count || 0);
 }
 
-function hasMarkerChanged(oldMarker, newMarker) {
-  return (
-    oldMarker.name !== newMarker.name ||
-    oldMarker.description !== newMarker.description ||
-    oldMarker.category !== newMarker.category ||
-    oldMarker.lat !== newMarker.lat ||
-    oldMarker.lng !== newMarker.lng ||
-    (oldMarker.image || "") !== (newMarker.image || "")
+async function loadMarkers(client = pool) {
+  const result = await client.query(`
+    SELECT id, name, description, category, lat, lng, image, updated_at
+    FROM markers
+    ORDER BY updated_at DESC, id ASC
+  `);
+
+  return result.rows.map(rowToMarker);
+}
+
+async function insertMarker(client, marker) {
+  await client.query(
+    `
+      INSERT INTO markers (
+        id, name, description, category, lat, lng, image, updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+    `,
+    [
+      marker.id,
+      marker.name,
+      marker.description,
+      marker.category,
+      marker.lat,
+      marker.lng,
+      marker.image
+    ]
   );
+}
+
+async function seedFromJsonIfDatabaseIsEmpty() {
+  const count = await getMarkerCount();
+
+  if (count > 0) {
+    return;
+  }
+
+  const markersFromJson = loadMarkersFromJson();
+
+  if (markersFromJson.length === 0) {
+    console.log("Keine Startdaten aus markers.json gefunden.");
+    return;
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query("BEGIN");
+
+    for (const marker of markersFromJson) {
+      await insertMarker(client, marker);
+    }
+
+    await client.query("COMMIT");
+    console.log(`${markersFromJson.length} Marker aus markers.json in Postgres importiert.`);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 async function sendDiscordLog(content) {
@@ -224,6 +325,17 @@ async function sendDiscordLog(content) {
   } catch (error) {
     console.error("Discord Webhook Fehler:", error.response?.data || error.message);
   }
+}
+
+function requireAdmin(req, res, next) {
+  if (!req.user || !req.user.isAdmin) {
+    return res.status(403).json({
+      success: false,
+      error: "Nur Admins dürfen diese Aktion ausführen."
+    });
+  }
+
+  next();
 }
 
 app.get("/auth/discord", passport.authenticate("discord"));
@@ -262,33 +374,61 @@ app.get("/api/user", (req, res) => {
   });
 });
 
-app.get("/api/health", (req, res) => {
-  res.json({
-    ok: true,
-    markerCount: loadMarkers().length
-  });
-});
-
-app.get("/markers", (req, res) => {
-  res.json(loadMarkers());
-});
-
-app.post("/markers", async (req, res) => {
+app.get("/api/health", async (req, res) => {
   try {
-    const incoming = Array.isArray(req.body.markers) ? req.body.markers : [];
-    const adminName = req.body.adminName || "Unbekannt";
+    const markerCount = await getMarkerCount();
 
-    const oldMarkers = loadMarkers();
-    const newMarkers = saveMarkers(incoming);
+    res.json({
+      ok: true,
+      markerCount
+    });
+  } catch (error) {
+    console.error("Health Fehler:", error.message);
+    res.status(500).json({ ok: false, error: "Datenbankfehler" });
+  }
+});
 
-    const oldMap = new Map(oldMarkers.map((m) => [m.id, m]));
-    const newMap = new Map(newMarkers.map((m) => [m.id, m]));
+app.get("/markers", async (req, res) => {
+  try {
+    const markers = await loadMarkers();
+    res.json(filterMarkersForUser(markers, req.user));
+  } catch (error) {
+    console.error("Fehler beim Laden der Marker:", error.message);
+    res.status(500).json({
+      success: false,
+      error: "Marker konnten nicht geladen werden."
+    });
+  }
+});
 
-    const added = newMarkers.filter((m) => !oldMap.has(m.id));
-    const removed = oldMarkers.filter((m) => !newMap.has(m.id));
-    const changed = newMarkers.filter((m) => {
-      const oldMarker = oldMap.get(m.id);
-      return oldMarker && hasMarkerChanged(oldMarker, m);
+app.post("/markers", requireAdmin, async (req, res) => {
+  const incoming = Array.isArray(req.body.markers) ? req.body.markers : [];
+  const cleanMarkers = incoming.map(normalizeMarker).filter(Boolean);
+  const adminName = req.user?.username || "Unbekannt";
+
+  let oldMarkers = [];
+  const client = await pool.connect();
+
+  try {
+    oldMarkers = await loadMarkers(client);
+
+    await client.query("BEGIN");
+    await client.query("DELETE FROM markers");
+
+    for (const marker of cleanMarkers) {
+      await insertMarker(client, marker);
+    }
+
+    await client.query("COMMIT");
+
+    const oldMap = new Map(oldMarkers.map((marker) => [marker.id, marker]));
+    const newMap = new Map(cleanMarkers.map((marker) => [marker.id, marker]));
+
+    const added = cleanMarkers.filter((marker) => !oldMap.has(marker.id));
+    const removed = oldMarkers.filter((marker) => !newMap.has(marker.id));
+    const changed = cleanMarkers.filter((marker) => {
+      const oldMarker = oldMap.get(marker.id);
+      return oldMarker && hasMarkerChanged(oldMarker, marker);
     });
 
     for (const marker of added) {
@@ -311,32 +451,63 @@ app.post("/markers", async (req, res) => {
 
     res.json({
       success: true,
-      markers: newMarkers
+      markers: cleanMarkers
     });
   } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch (rollbackError) {
+      console.error("Rollback Fehler:", rollbackError.message);
+    }
+
     console.error("Fehler beim Speichern der Marker:", error.message);
     res.status(500).json({
       success: false,
       error: "Marker konnten nicht gespeichert werden."
     });
+  } finally {
+    client.release();
   }
 });
 
-app.post("/upload", upload.single("file"), (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({
-      success: false,
-      error: "Keine Datei hochgeladen"
-    });
-  }
+app.post("/upload", requireAdmin, (req, res) => {
+  upload.single("file")(req, res, (error) => {
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        error: error.message || "Upload fehlgeschlagen"
+      });
+    }
 
-  res.json({
-    success: true,
-    file: req.file.filename,
-    path: `screenshots/${req.file.filename}`
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        error: "Keine Datei hochgeladen"
+      });
+    }
+
+    const dataUrl = `data:${req.file.mimetype};base64,${req.file.buffer.toString("base64")}`;
+
+    res.json({
+      success: true,
+      file: req.file.originalname,
+      path: dataUrl
+    });
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`Server läuft auf Port ${PORT}`);
-});
+async function startServer() {
+  try {
+    await createMarkersTable();
+    await seedFromJsonIfDatabaseIsEmpty();
+
+    app.listen(PORT, () => {
+      console.log(`Server läuft auf Port ${PORT}`);
+    });
+  } catch (error) {
+    console.error("Serverstart fehlgeschlagen:", error.message);
+    process.exit(1);
+  }
+}
+
+startServer();
