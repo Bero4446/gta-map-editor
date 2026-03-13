@@ -28,14 +28,14 @@
       <div id="panelToggle">☰</div>
 
       <div class="tabs">
-        <button class="tab active" data-tab="editor">Editor</button>
-        <button class="tab" data-tab="filter">Filter</button>
+        <button class="tab admin-only hidden" data-tab="editor">Editor</button>
+        <button class="tab active" data-tab="filter">Filter</button>
         <button class="tab" data-tab="stats">Statistik</button>
-        <button class="tab" data-tab="export">Export</button>
+        <button class="tab admin-only hidden" data-tab="export">Export</button>
         <button class="tab vip-only hidden" data-tab="vip">VIP</button>
       </div>
 
-      <div class="tab-content active" id="editor">
+      <div class="tab-content admin-only hidden" id="editor">
         <h2>Marker Editor</h2>
 
         <div class="status-box" id="roleInfo">
@@ -83,7 +83,7 @@
         </div>
       </div>
 
-      <div class="tab-content" id="filter">
+      <div class="tab-content active" id="filter">
         <h2>Filter</h2>
 
         <label class="check">
@@ -123,7 +123,7 @@
         <div id="statVip" class="stat-card vip-only hidden">Schwarzmarkt: 0</div>
       </div>
 
-      <div class="tab-content" id="export">
+      <div class="tab-content admin-only hidden" id="export">
         <h2>Export</h2>
 
         <div class="status-box">
