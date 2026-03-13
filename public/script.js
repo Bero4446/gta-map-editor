@@ -59,6 +59,18 @@ function showMessage(text, type = "success") {
   }, 3500);
 }
 
+function isAdmin() {
+  return !!currentUser.loggedIn && !!currentUser.isAdmin;
+}
+
+function isVipOrAdmin() {
+  return !!currentUser.loggedIn && (!!currentUser.isVip || !!currentUser.isAdmin);
+}
+
+function canAccessAdminArea() {
+  return !!currentUser.loggedIn && !!currentUser.isAdmin;
+}
+
 function getActiveFilters() {
   return Array.from(document.querySelectorAll("[data-filter]:checked")).map((el) => el.dataset.filter);
 }
@@ -68,7 +80,7 @@ function shouldShowMarker(marker) {
   const searchValue = document.getElementById("markerSearch")?.value.trim().toLowerCase() || "";
 
   if (!activeFilters.includes(marker.category)) return false;
-  if (marker.category === "Schwarzmarkt" && !(currentUser.isVip || currentUser.isAdmin)) return false;
+  if (marker.category === "Schwarzmarkt" && !isVipOrAdmin()) return false;
 
   if (!searchValue) return true;
 
@@ -80,12 +92,30 @@ function getVisibleMarkers() {
   return markers.filter((marker) => shouldShowMarker(marker));
 }
 
-function isAdmin() {
-  return !!currentUser.isAdmin;
+function switchToTab(tabName) {
+  const targetTab = document.querySelector(`.tab[data-tab="${tabName}"]`);
+  const targetContent = document.getElementById(tabName);
+
+  if (!targetTab || !targetContent) return;
+  if (targetTab.classList.contains("hidden") || targetContent.classList.contains("hidden")) return;
+
+  document.querySelectorAll(".tab").forEach((tab) => tab.classList.remove("active"));
+  document.querySelectorAll(".tab-content").forEach((content) => content.classList.remove("active"));
+
+  targetTab.classList.add("active");
+  targetContent.classList.add("active");
 }
 
-function isVipOrAdmin() {
-  return !!currentUser.isVip || !!currentUser.isAdmin;
+function ensureAllowedActiveTab() {
+  const activeTab = document.querySelector(".tab.active");
+  const activeContent = document.querySelector(".tab-content.active");
+
+  const activeTabHidden = !activeTab || activeTab.classList.contains("hidden");
+  const activeContentHidden = !activeContent || activeContent.classList.contains("hidden");
+
+  if (activeTabHidden || activeContentHidden) {
+    switchToTab("filter");
+  }
 }
 
 function clearForm() {
@@ -95,6 +125,7 @@ function clearForm() {
   document.getElementById("markerCategory").value = "Dealer";
   document.getElementById("markerLat").value = "";
   document.getElementById("markerLng").value = "";
+
   const img = document.getElementById("markerImage");
   if (img) img.value = "";
 
@@ -139,17 +170,23 @@ function updateUserUi() {
   const roleInfo = document.getElementById("roleInfo");
   const logoutBtn = document.getElementById("logoutBtn");
   const vipElements = document.querySelectorAll(".vip-only");
+  const adminElements = document.querySelectorAll(".admin-only");
   const saveButton = document.getElementById("saveMarker");
 
   if (!currentUser.loggedIn) {
     if (loginStatus) loginStatus.textContent = "Nicht eingeloggt";
     if (roleInfo) roleInfo.textContent = "Discord Login nötig. Marker erstellen/bearbeiten nur mit Admin-Rolle.";
     if (logoutBtn) logoutBtn.classList.add("hidden");
+
     vipElements.forEach((el) => el.classList.add("hidden"));
+    adminElements.forEach((el) => el.classList.add("hidden"));
+
     if (saveButton) {
       saveButton.disabled = true;
       saveButton.textContent = "Nur Admin";
     }
+
+    ensureAllowedActiveTab();
     return;
   }
 
@@ -172,6 +209,12 @@ function updateUserUi() {
     vipElements.forEach((el) => el.classList.add("hidden"));
   }
 
+  if (canAccessAdminArea()) {
+    adminElements.forEach((el) => el.classList.remove("hidden"));
+  } else {
+    adminElements.forEach((el) => el.classList.add("hidden"));
+  }
+
   if (saveButton) {
     if (isAdmin()) {
       saveButton.disabled = false;
@@ -181,12 +224,15 @@ function updateUserUi() {
       saveButton.textContent = "Nur Admin";
     }
   }
+
+  ensureAllowedActiveTab();
 }
 
 async function loadMarkers() {
   try {
     const res = await fetch("/markers");
     if (!res.ok) throw new Error("Marker konnten nicht geladen werden.");
+
     markers = await res.json();
     renderMarkers();
     updateStats();
@@ -409,11 +455,13 @@ function downloadJson(filename, data) {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
+
   a.href = url;
   a.download = filename;
   document.body.appendChild(a);
   a.click();
   a.remove();
+
   URL.revokeObjectURL(url);
 }
 
@@ -480,6 +528,7 @@ async function handleSaveMarker() {
 
 window.editMarker = function (id) {
   if (!isAdmin()) return;
+
   const marker = markers.find((m) => m.id === id);
   if (!marker) {
     showMessage("Marker konnte nicht geladen werden.", "error");
@@ -487,12 +536,7 @@ window.editMarker = function (id) {
   }
 
   fillForm(marker);
-
-  document.querySelectorAll(".tab").forEach((b) => b.classList.remove("active"));
-  document.querySelectorAll(".tab-content").forEach((c) => c.classList.remove("active"));
-  document.querySelector('[data-tab="editor"]')?.classList.add("active");
-  document.getElementById("editor")?.classList.add("active");
-
+  switchToTab("editor");
   showMessage("Marker zum Bearbeiten geladen.");
 };
 
@@ -544,11 +588,21 @@ document.getElementById("copyCoordsBtn")?.addEventListener("click", () => {
 });
 
 document.getElementById("exportAllBtn")?.addEventListener("click", () => {
+  if (!isAdmin()) {
+    showMessage("Nur Admins dürfen exportieren.", "error");
+    return;
+  }
+
   downloadJson("markers-all.json", markers);
   showMessage("Alle Marker exportiert.");
 });
 
 document.getElementById("exportVisibleBtn")?.addEventListener("click", () => {
+  if (!isAdmin()) {
+    showMessage("Nur Admins dürfen exportieren.", "error");
+    return;
+  }
+
   downloadJson("markers-visible.json", getVisibleMarkers());
   showMessage("Sichtbare Marker exportiert.");
 });
@@ -583,10 +637,8 @@ document.querySelectorAll("[data-filter]").forEach((checkbox) => {
 
 document.querySelectorAll(".tab").forEach((btn) => {
   btn.addEventListener("click", () => {
-    document.querySelectorAll(".tab").forEach((b) => b.classList.remove("active"));
-    document.querySelectorAll(".tab-content").forEach((c) => c.classList.remove("active"));
-    btn.classList.add("active");
-    document.getElementById(btn.dataset.tab)?.classList.add("active");
+    if (btn.classList.contains("hidden")) return;
+    switchToTab(btn.dataset.tab);
   });
 });
 
