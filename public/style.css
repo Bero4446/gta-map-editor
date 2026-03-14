@@ -295,6 +295,59 @@ button.danger:hover{
   gap:10px;
 }
 
+.search-group{
+  border-radius:14px;
+  background:#101723;
+  border:1px solid #2b3345;
+  overflow:hidden;
+}
+
+.search-group-summary{
+  list-style:none;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  padding:14px 16px;
+  cursor:pointer;
+  user-select:none;
+  font-weight:700;
+}
+
+.search-group-summary::-webkit-details-marker{
+  display:none;
+}
+
+.search-group-left{
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+
+.search-group-right{
+  min-width:28px;
+  height:28px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  border-radius:999px;
+  background:#5865f2;
+  color:#fff;
+  font-size:12px;
+  font-weight:700;
+}
+
+.search-group-items{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+  padding:0 12px 12px;
+}
+
+.search-group:not([open]) .search-group-items{
+  display:none;
+}
+
 .search-result{
   padding:12px;
   border-radius:12px;
