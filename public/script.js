@@ -2,6 +2,18 @@ const MAP_IMAGE = "GTAV-HD-MAP-satellite.jpg";
 const MAP_SIZE = 8192;
 const BOUNDS = [[0, 0], [MAP_SIZE, MAP_SIZE]];
 
+const CATEGORY_META = {
+  Dealer: { icon: "💊", statId: "statDealer", label: "Dealer" },
+  UG: { icon: "🔫", statId: "statUG", label: "UG" },
+  Feld: { icon: "🌿", statId: "statField", label: "Felder" },
+  Workstation: { icon: "🖥️", statId: "statWorkstation", label: "Workstations" },
+  Schwarzmarkt: { icon: "🕶", statId: "statVip", label: "Schwarzmarkt", vipOnly: true },
+  "Fraktions Krankenhaus": { icon: "🏥", statId: "statHospital", label: "Fraktions Krankenhaus" },
+  Systempunkteshop: { icon: "🛒", statId: "statPointShop", label: "Systempunkteshop" },
+  Fraktion: { icon: "🛡️", statId: "statFaction", label: "Fraktion" },
+  Fraktionsgebiet: { icon: "🗺️", statId: "statTerritory", label: "Fraktionsgebiete", territory: true }
+};
+
 const map = L.map("map", {
   crs: L.CRS.Simple,
   minZoom: -4,
@@ -18,6 +30,7 @@ map.setZoom(-2);
 
 let markers = [];
 let markerLayers = [];
+let markerLayerById = new Map();
 let selectedMarkerId = null;
 let selectedHistoryMarkerId = null;
 let currentUser = {
@@ -28,16 +41,9 @@ let currentUser = {
   id: ""
 };
 
-const icons = {
-  Dealer: createEmojiIcon("💊"),
-  UG: createEmojiIcon("🔫"),
-  Feld: createEmojiIcon("🌿"),
-  Workstation: createEmojiIcon("🖥️"),
-  Schwarzmarkt: createEmojiIcon("🕶"),
-  "Fraktions Krankenhaus": createEmojiIcon("🏥"),
-  Systempunkteshop: createEmojiIcon("🛒"),
-  Fraktion: createEmojiIcon("🛡️")
-};
+const icons = Object.fromEntries(
+  Object.entries(CATEGORY_META).map(([key, meta]) => [key, createEmojiIcon(meta.icon)])
+);
 
 function createEmojiIcon(emoji) {
   return L.divIcon({
@@ -115,27 +121,57 @@ function getActiveFilters() {
   return Array.from(document.querySelectorAll("[data-filter]:checked")).map((el) => el.dataset.filter);
 }
 
+function getSearchValue() {
+  return document.getElementById("globalSearch")?.value.trim().toLowerCase() || "";
+}
+
+function getOwnerFilterValue() {
+  if (!isAdmin()) return "";
+  return document.getElementById("ownerFilter")?.value.trim().toLowerCase() || "";
+}
+
+function getRadiusValueFromForm() {
+  const raw = Number(document.getElementById("markerRadius")?.value || 0);
+  if (!Number.isFinite(raw) || raw <= 0) return 200;
+  return Math.max(50, Math.round(raw));
+}
+
+function getSearchText(marker) {
+  const base = `${marker.name} ${marker.description} ${marker.category}`.toLowerCase();
+  if (!isAdmin()) return base;
+  return `${base} ${marker.owner || ""}`.toLowerCase();
+}
+
 function shouldShowMarker(marker) {
   const activeFilters = getActiveFilters();
-  const searchValue = document.getElementById("markerSearch")?.value.trim().toLowerCase() || "";
+  const searchValue = getSearchValue();
   const favoritesOnly = !!document.getElementById("favoritesOnly")?.checked;
+  const ownerFilter = getOwnerFilterValue();
+  const myMarkersOnly = isAdmin() && !!document.getElementById("myMarkersOnly")?.checked;
 
   if (!activeFilters.includes(marker.category)) return false;
   if (marker.category === "Schwarzmarkt" && !isVipOrAdmin()) return false;
   if (favoritesOnly && !marker.favorite) return false;
 
-  if (!searchValue) return true;
+  if (myMarkersOnly && String(marker.owner || "").trim().toLowerCase() !== String(currentUser.username || "").trim().toLowerCase()) {
+    return false;
+  }
 
-  const text = `${marker.name} ${marker.description} ${marker.category} ${marker.owner || ""}`.toLowerCase();
-  return text.includes(searchValue);
+  if (ownerFilter) {
+    const ownerText = String(marker.owner || "").toLowerCase();
+    if (!ownerText.includes(ownerFilter)) return false;
+  }
+
+  if (!searchValue) return true;
+  return getSearchText(marker).includes(searchValue);
 }
 
 function getVisibleMarkers() {
   return markers.filter((marker) => shouldShowMarker(marker));
 }
 
-function getSortedMarkers() {
-  return [...markers].sort((a, b) => {
+function getSortedMarkers(list = markers) {
+  return [...list].sort((a, b) => {
     if (!!a.favorite !== !!b.favorite) return Number(b.favorite) - Number(a.favorite);
     return String(a.name || "").localeCompare(String(b.name || ""), "de");
   });
@@ -169,6 +205,18 @@ function ensureAllowedActiveTab() {
   }
 }
 
+function updateRadiusFieldVisibility() {
+  const wrap = document.getElementById("markerRadiusWrap");
+  const category = document.getElementById("markerCategory")?.value;
+  if (!wrap) return;
+
+  if (category === "Fraktionsgebiet") {
+    wrap.classList.remove("hidden");
+  } else {
+    wrap.classList.add("hidden");
+  }
+}
+
 function clearForm() {
   selectedMarkerId = null;
   document.getElementById("markerName").value = "";
@@ -176,6 +224,7 @@ function clearForm() {
   document.getElementById("markerCategory").value = "Dealer";
   document.getElementById("markerOwner").value = "";
   document.getElementById("markerFavorite").checked = false;
+  document.getElementById("markerRadius").value = "200";
   document.getElementById("markerLat").value = "";
   document.getElementById("markerLng").value = "";
 
@@ -185,6 +234,7 @@ function clearForm() {
   const editModeInfo = document.getElementById("editModeInfo");
   if (editModeInfo) editModeInfo.classList.add("hidden");
 
+  updateRadiusFieldVisibility();
   updateUserUi();
 }
 
@@ -195,12 +245,14 @@ function fillForm(marker) {
   document.getElementById("markerCategory").value = marker.category || "Dealer";
   document.getElementById("markerOwner").value = marker.owner || "";
   document.getElementById("markerFavorite").checked = !!marker.favorite;
+  document.getElementById("markerRadius").value = marker.radius || 200;
   document.getElementById("markerLat").value = marker.lat;
   document.getElementById("markerLng").value = marker.lng;
 
   const editModeInfo = document.getElementById("editModeInfo");
   if (editModeInfo) editModeInfo.classList.remove("hidden");
 
+  updateRadiusFieldVisibility();
   updateUserUi();
 }
 
@@ -245,6 +297,7 @@ function updateUserUi() {
     }
 
     ensureAllowedActiveTab();
+    renderSearchResults();
     return;
   }
 
@@ -260,7 +313,7 @@ function updateUserUi() {
   }
   if (historyHint) {
     historyHint.textContent = isAdmin()
-      ? "Wähle einen Marker aus, um seinen Verlauf zu sehen."
+      ? "Wähle einen Marker aus, um seinen Verlauf zu sehen und alte Versionen wiederherzustellen."
       : "Historie nur für Admins sichtbar.";
   }
 
@@ -289,6 +342,7 @@ function updateUserUi() {
   }
 
   ensureAllowedActiveTab();
+  renderSearchResults();
 }
 
 async function loadMarkers() {
@@ -299,6 +353,7 @@ async function loadMarkers() {
     markers = await res.json();
     renderMarkers();
     updateStats();
+    renderSearchResults();
   } catch (error) {
     console.error(error);
     showMessage("Marker konnten nicht geladen werden.", "error");
@@ -345,11 +400,15 @@ function buildPopupHtml(marker) {
     : "";
 
   const ownerHtml = isAdmin()
-    ? `<div class="popup-meta">Besitzer: ${escapeHtml(marker.owner || "-")}</div>`
+    ? `<div class="popup-meta">Besitzer/Zuständigkeit: ${escapeHtml(marker.owner || "-")}</div>`
     : "";
 
   const favoriteHtml = marker.favorite
     ? `<div class="popup-meta">⭐ Favorit</div>`
+    : "";
+
+  const territoryHtml = marker.category === "Fraktionsgebiet"
+    ? `<div class="popup-meta">Gebietsradius: ${escapeHtml(formatValue(marker.radius || 200))} m</div>`
     : "";
 
   const adminButtons = isAdmin()
@@ -357,6 +416,7 @@ function buildPopupHtml(marker) {
       <button onclick="window.editMarker('${marker.id}')">Bearbeiten</button>
       <button onclick="window.toggleMarkerFavorite('${marker.id}')">${marker.favorite ? "Favorit entfernen" : "Als Favorit"}</button>
       <button onclick="window.showMarkerHistory('${marker.id}')">Verlauf</button>
+      <button class="secondary" onclick="window.copyMarkerOwner('${marker.id}')">Besitzer kopieren</button>
       <button class="secondary" onclick="window.deleteMarker('${marker.id}')">Löschen</button>
     `
     : "";
@@ -375,6 +435,7 @@ function buildPopupHtml(marker) {
       <div class="popup-category">Kategorie: ${escapeHtml(marker.category)}</div>
       ${favoriteHtml}
       ${ownerHtml}
+      ${territoryHtml}
       <div class="popup-meta">Lat: ${Number(marker.lat).toFixed(2)} | Lng: ${Number(marker.lng).toFixed(2)}</div>
       ${adminMeta}
       ${descriptionHtml}
@@ -387,33 +448,87 @@ function buildPopupHtml(marker) {
   `;
 }
 
+function getTerritoryStyle(marker) {
+  const owner = String(marker.owner || "neutral");
+  let hash = 0;
+  for (let i = 0; i < owner.length; i += 1) {
+    hash = ((hash << 5) - hash) + owner.charCodeAt(i);
+    hash |= 0;
+  }
+
+  const palette = ["#5865f2", "#57f287", "#faa61a", "#eb459e", "#3ba55d", "#ed4245"];
+  const index = Math.abs(hash) % palette.length;
+  return {
+    color: palette[index],
+    weight: 2,
+    fillOpacity: 0.12
+  };
+}
+
+function focusMarkerById(id, openPopup = true) {
+  const marker = markers.find((m) => m.id === id);
+  const layer = markerLayerById.get(id);
+  if (!marker || !layer) return;
+
+  map.flyTo([Number(marker.lat), Number(marker.lng)], Math.max(map.getZoom(), -1.25), {
+    duration: 0.6
+  });
+
+  if (openPopup && layer.marker) {
+    setTimeout(() => layer.marker.openPopup(), 250);
+  }
+}
+
 function renderMarkers() {
-  markerLayers.forEach((layer) => map.removeLayer(layer));
+  markerLayers.forEach((layer) => {
+    if (layer.group) {
+      map.removeLayer(layer.group);
+    }
+  });
+
   markerLayers = [];
+  markerLayerById = new Map();
 
   getSortedMarkers().forEach((marker) => {
     if (!shouldShowMarker(marker)) return;
 
-    const layer = L.marker([Number(marker.lat), Number(marker.lng)], {
+    const group = L.layerGroup();
+    let territoryLayer = null;
+
+    if (marker.category === "Fraktionsgebiet") {
+      territoryLayer = L.circle([Number(marker.lat), Number(marker.lng)], {
+        radius: Number(marker.radius) || 200,
+        ...getTerritoryStyle(marker)
+      });
+      territoryLayer.bindPopup(buildPopupHtml(marker));
+      territoryLayer.bindTooltip(`${marker.name} (${Number(marker.radius) || 200}m)`, {
+        className: "territory-label",
+        sticky: true,
+        direction: "top"
+      });
+      territoryLayer.addTo(group);
+    }
+
+    const markerLayer = L.marker([Number(marker.lat), Number(marker.lng)], {
       icon: icons[marker.category] || icons.Dealer,
       draggable: isAdmin(),
       title: marker.favorite ? `⭐ ${marker.name}` : marker.name
-    }).addTo(map);
+    });
 
-    layer.bindTooltip(marker.favorite ? `⭐ ${marker.name}` : (marker.name || "Marker"), {
+    markerLayer.bindTooltip(marker.favorite ? `⭐ ${marker.name}` : (marker.name || "Marker"), {
       direction: "top",
       opacity: 0.95
     });
 
-    layer.bindPopup(buildPopupHtml(marker));
+    markerLayer.bindPopup(buildPopupHtml(marker));
 
-    layer.on("click", () => {
+    markerLayer.on("click", () => {
       map.flyTo([Number(marker.lat), Number(marker.lng)], Math.max(map.getZoom(), -1.5), {
         duration: 0.45
       });
     });
 
-    layer.on("dragend", async (e) => {
+    markerLayer.on("dragend", async (e) => {
       if (!isAdmin()) return;
 
       try {
@@ -424,6 +539,7 @@ function renderMarkers() {
         await saveMarkers();
         updateStats();
         renderMarkers();
+        renderSearchResults();
         showMessage("Marker verschoben und gespeichert.");
       } catch (error) {
         console.error(error);
@@ -431,7 +547,12 @@ function renderMarkers() {
       }
     });
 
-    markerLayers.push(layer);
+    markerLayer.addTo(group);
+    group.addTo(map);
+
+    const entry = { id: marker.id, group, marker: markerLayer, territory: territoryLayer };
+    markerLayers.push(entry);
+    markerLayerById.set(marker.id, entry);
   });
 }
 
@@ -439,29 +560,54 @@ function updateStats() {
   const visible = getVisibleMarkers();
   const allVisibleForUser = markers.filter((m) => m.category !== "Schwarzmarkt" || isVipOrAdmin());
   const favoriteCount = allVisibleForUser.filter((m) => m.favorite).length;
-  const vipVisible = markers.filter((m) => m.category === "Schwarzmarkt" && isVipOrAdmin());
 
   const statTotal = document.getElementById("statTotal");
-  const statDealer = document.getElementById("statDealer");
-  const statUG = document.getElementById("statUG");
-  const statField = document.getElementById("statField");
-  const statWorkstation = document.getElementById("statWorkstation");
-  const statHospital = document.getElementById("statHospital");
-  const statPointShop = document.getElementById("statPointShop");
-  const statFaction = document.getElementById("statFaction");
-  const statVip = document.getElementById("statVip");
   const statFavorites = document.getElementById("statFavorites");
-
   if (statTotal) statTotal.textContent = `Marker sichtbar: ${visible.length}`;
-  if (statDealer) statDealer.textContent = `Dealer: ${markers.filter((m) => m.category === "Dealer").length}`;
-  if (statUG) statUG.textContent = `UG: ${markers.filter((m) => m.category === "UG").length}`;
-  if (statField) statField.textContent = `Felder: ${markers.filter((m) => m.category === "Feld").length}`;
-  if (statWorkstation) statWorkstation.textContent = `Workstations: ${markers.filter((m) => m.category === "Workstation").length}`;
-  if (statHospital) statHospital.textContent = `Fraktions Krankenhaus: ${markers.filter((m) => m.category === "Fraktions Krankenhaus").length}`;
-  if (statPointShop) statPointShop.textContent = `Systempunkteshop: ${markers.filter((m) => m.category === "Systempunkteshop").length}`;
-  if (statFaction) statFaction.textContent = `Fraktion: ${markers.filter((m) => m.category === "Fraktion").length}`;
-  if (statVip) statVip.textContent = `Schwarzmarkt: ${vipVisible.length}`;
   if (statFavorites) statFavorites.textContent = `Favoriten: ${favoriteCount}`;
+
+  Object.entries(CATEGORY_META).forEach(([category, meta]) => {
+    const el = document.getElementById(meta.statId);
+    if (!el) return;
+    const count = markers.filter((m) => m.category === category && (category !== "Schwarzmarkt" || isVipOrAdmin())).length;
+    el.textContent = `${meta.label}: ${count}`;
+  });
+}
+
+function renderSearchResults() {
+  const list = document.getElementById("searchResults");
+  if (!list) return;
+
+  const searchValue = getSearchValue();
+  const visible = getSortedMarkers(getVisibleMarkers());
+
+  if (!visible.length) {
+    list.innerHTML = `<div class="status-box">Keine Marker passen zu den aktuellen Filtern.</div>`;
+    return;
+  }
+
+  const results = searchValue ? visible.slice(0, 10) : visible.slice(0, 8);
+
+  list.innerHTML = results.map((marker) => {
+    const owner = isAdmin() ? `<div class="search-result-meta">Besitzer: ${escapeHtml(marker.owner || "-")}</div>` : "";
+    const territory = marker.category === "Fraktionsgebiet"
+      ? `<div class="search-result-meta">Radius: ${escapeHtml(formatValue(marker.radius || 200))} m</div>`
+      : "";
+
+    return `
+      <div class="search-result">
+        <div class="search-result-title">${marker.favorite ? "⭐ " : ""}${escapeHtml(marker.name)}</div>
+        <div class="search-result-meta">${escapeHtml(marker.category)} • ${Number(marker.lat).toFixed(2)}, ${Number(marker.lng).toFixed(2)}</div>
+        ${owner}
+        ${territory}
+        <div class="search-result-actions">
+          <button onclick="window.focusMarker('${marker.id}')">Auf Karte</button>
+          ${isAdmin() ? `<button class="secondary" onclick="window.editMarker('${marker.id}')">Bearbeiten</button>` : ""}
+          ${isAdmin() ? `<button class="secondary" onclick="window.showMarkerHistory('${marker.id}')">Verlauf</button>` : ""}
+        </div>
+      </div>
+    `;
+  }).join("");
 }
 
 async function uploadImageIfNeeded() {
@@ -503,6 +649,21 @@ window.copyMarkerCoords = function (id) {
   }
 
   copyToClipboard(`${marker.lat}, ${marker.lng}`, "Marker-Koordinaten kopiert.");
+};
+
+window.copyMarkerOwner = function (id) {
+  if (!isAdmin()) return;
+  const marker = markers.find((m) => m.id === id);
+  if (!marker) {
+    showMessage("Marker nicht gefunden.", "error");
+    return;
+  }
+
+  copyToClipboard(marker.owner || "", "Besitzer/Zuständigkeit kopiert.");
+};
+
+window.focusMarker = function (id) {
+  focusMarkerById(id, true);
 };
 
 window.openImageModal = function (src) {
@@ -550,6 +711,7 @@ async function handleSaveMarker() {
   const favorite = !!document.getElementById("markerFavorite").checked;
   const lat = Number(document.getElementById("markerLat").value);
   const lng = Number(document.getElementById("markerLng").value);
+  const radius = category === "Fraktionsgebiet" ? getRadiusValueFromForm() : 0;
 
   if (!name) {
     showMessage("Bitte einen Namen für den Marker eingeben.", "error");
@@ -574,6 +736,7 @@ async function handleSaveMarker() {
       marker.category = category;
       marker.owner = ownerInput || currentUser.username;
       marker.favorite = favorite;
+      marker.radius = radius;
       marker.lat = roundCoord(lat);
       marker.lng = roundCoord(lng);
       if (imagePath) marker.image = imagePath;
@@ -587,6 +750,7 @@ async function handleSaveMarker() {
         category,
         owner: ownerInput || currentUser.username,
         favorite,
+        radius,
         lat: roundCoord(lat),
         lng: roundCoord(lng),
         image: imagePath || "",
@@ -601,6 +765,7 @@ async function handleSaveMarker() {
     clearForm();
     renderMarkers();
     updateStats();
+    renderSearchResults();
     showMessage(wasEditing ? "Marker gespeichert." : "Marker erstellt.");
   } catch (error) {
     console.error(error);
@@ -646,6 +811,7 @@ window.toggleMarkerFavorite = async function (id) {
     await saveMarkers();
     renderMarkers();
     updateStats();
+    renderSearchResults();
     showMessage(marker.favorite ? "Marker als Favorit gespeichert." : "Favorit entfernt.");
   } catch (error) {
     console.error(error);
@@ -658,18 +824,15 @@ window.deleteMarker = async function (id) {
   if (!confirm("Marker wirklich löschen?")) return;
 
   try {
+    selectedHistoryMarkerId = id;
     markers = markers.filter((m) => m.id !== id);
     await saveMarkers();
     clearForm();
     renderMarkers();
     updateStats();
-
-    if (selectedHistoryMarkerId === id) {
-      selectedHistoryMarkerId = null;
-      renderHistory([]);
-    }
-
-    showMessage("Marker gelöscht.");
+    renderSearchResults();
+    await window.showMarkerHistory(id);
+    showMessage("Marker gelöscht. Über Verlauf kannst du ihn wiederherstellen.");
   } catch (error) {
     console.error(error);
     showMessage("Marker konnte nicht gelöscht werden.", "error");
@@ -689,7 +852,7 @@ function renderHistory(history) {
   }
 
   const marker = markers.find((m) => m.id === selectedHistoryMarkerId);
-  title.textContent = marker ? `Verlauf: ${marker.name}` : "Verlauf";
+  title.textContent = marker ? `Verlauf: ${marker.name}` : `Verlauf: ${selectedHistoryMarkerId}`;
 
   if (!history.length) {
     list.innerHTML = `<div class="status-box">Keine Historie gefunden.</div>`;
@@ -702,13 +865,18 @@ function renderHistory(history) {
         ? `<ul>${entry.changes.map((change) => `<li><strong>${escapeHtml(change.label || change.field || "Änderung")}</strong>: ${escapeHtml(formatValue(change.before))} → ${escapeHtml(formatValue(change.after))}</li>`).join("")}</ul>`
         : "";
 
+      const restoreButton = isAdmin()
+        ? `<div class="history-actions"><button onclick="window.restoreHistoryEntry('${entry.historyId}')">Diese Version wiederherstellen</button></div>`
+        : "";
+
       return `
-        <div class="stat-card">
+        <div class="history-entry">
           <strong>${escapeHtml(entry.action)}</strong><br>
           ${escapeHtml(formatDateTime(entry.createdAt))}<br>
           Admin: ${escapeHtml(entry.adminName || "-")}<br>
           ${escapeHtml(entry.changeSummary || "-")}
           ${changesHtml}
+          ${restoreButton}
         </div>
       `;
     })
@@ -735,6 +903,34 @@ window.showMarkerHistory = async function (id) {
     console.error(error);
     showMessage(error.message || "Historie konnte nicht geladen werden.", "error");
     renderHistory([]);
+  }
+};
+
+window.restoreHistoryEntry = async function (historyId) {
+  if (!isAdmin()) return;
+  if (!confirm("Diese Version wirklich wiederherstellen?")) return;
+
+  try {
+    const res = await fetch(`/api/marker-history-entry/${encodeURIComponent(historyId)}/restore`, {
+      method: "POST"
+    });
+
+    const data = await res.json();
+
+    if (!res.ok || data.success === false) {
+      throw new Error(data.error || "Version konnte nicht wiederhergestellt werden.");
+    }
+
+    await loadMarkers();
+    if (data.marker?.id) {
+      selectedHistoryMarkerId = data.marker.id;
+      await window.showMarkerHistory(data.marker.id);
+      focusMarkerById(data.marker.id, true);
+    }
+    showMessage("Version erfolgreich wiederhergestellt.");
+  } catch (error) {
+    console.error(error);
+    showMessage(error.message || "Version konnte nicht wiederhergestellt werden.", "error");
   }
 };
 
@@ -785,6 +981,7 @@ async function importMarkersFromFile() {
     renderMarkers();
     updateStats();
     renderHistory([]);
+    renderSearchResults();
     fileInput.value = "";
     showMessage(`Import erfolgreich. Marker importiert: ${data.imported || markers.length}`);
   } catch (error) {
@@ -848,37 +1045,57 @@ document.getElementById("exportVisibleBtn")?.addEventListener("click", () => {
 
 document.getElementById("importMarkersBtn")?.addEventListener("click", importMarkersFromFile);
 
-document.getElementById("markerSearch")?.addEventListener("input", () => {
-  const search = document.getElementById("markerSearch").value.trim().toLowerCase();
+document.getElementById("markerCategory")?.addEventListener("change", updateRadiusFieldVisibility);
 
+document.getElementById("globalSearch")?.addEventListener("input", () => {
   renderMarkers();
   updateStats();
+  renderSearchResults();
 
+  const search = getSearchValue();
   if (!search) return;
 
-  const found = getSortedMarkers().find((marker) => {
-    if (!shouldShowMarker(marker)) return false;
-    const text = `${marker.name} ${marker.description} ${marker.category} ${marker.owner || ""}`.toLowerCase();
-    return text.includes(search);
-  });
-
+  const found = getSortedMarkers(getVisibleMarkers())[0];
   if (found) {
-    map.flyTo([Number(found.lat), Number(found.lng)], Math.max(map.getZoom(), -1.25), {
-      duration: 0.6
-    });
+    focusMarkerById(found.id, false);
   }
+});
+
+document.getElementById("markerSearch")?.addEventListener("input", () => {
+  const search = document.getElementById("markerSearch").value.trim().toLowerCase();
+  if (!search) return;
+
+  const found = getSortedMarkers(markers).find((marker) => getSearchText(marker).includes(search));
+  if (found) {
+    fillForm(found);
+    focusMarkerById(found.id, false);
+  }
+});
+
+document.getElementById("ownerFilter")?.addEventListener("input", () => {
+  renderMarkers();
+  updateStats();
+  renderSearchResults();
+});
+
+document.getElementById("myMarkersOnly")?.addEventListener("change", () => {
+  renderMarkers();
+  updateStats();
+  renderSearchResults();
 });
 
 document.querySelectorAll("[data-filter]").forEach((checkbox) => {
   checkbox.addEventListener("change", () => {
     renderMarkers();
     updateStats();
+    renderSearchResults();
   });
 });
 
 document.getElementById("favoritesOnly")?.addEventListener("change", () => {
   renderMarkers();
   updateStats();
+  renderSearchResults();
 });
 
 document.querySelectorAll(".tab").forEach((btn) => {
@@ -890,7 +1107,6 @@ document.querySelectorAll(".tab").forEach((btn) => {
 
 document.getElementById("panelToggle")?.addEventListener("click", () => {
   document.getElementById("panel")?.classList.toggle("collapsed");
-  setTimeout(() => map.invalidateSize(), 260);
 });
 
 document.getElementById("discordLogin")?.addEventListener("click", () => {
@@ -901,25 +1117,17 @@ document.getElementById("logoutBtn")?.addEventListener("click", () => {
   window.location.href = "/logout";
 });
 
-document.getElementById("closeImageModal")?.addEventListener("click", () => {
-  window.closeImageModal();
-});
+document.getElementById("closeImageModal")?.addEventListener("click", window.closeImageModal);
+document.querySelector(".image-modal-backdrop")?.addEventListener("click", window.closeImageModal);
 
-document.querySelector(".image-modal-backdrop")?.addEventListener("click", () => {
-  window.closeImageModal();
-});
-
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape") {
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
     window.closeImageModal();
   }
 });
 
-async function init() {
-  renderHistory([]);
+(async function init() {
   await fetchUser();
   await loadMarkers();
-  setTimeout(() => map.invalidateSize(), 150);
-}
-
-init();
+  clearForm();
+})();
