@@ -16,6 +16,8 @@
 
     <div class="top-actions">
       <input id="globalSearch" class="top-search" placeholder="🔍 Marker suchen" />
+      <div id="syncStatus" class="sync-pill offline">● Offline</div>
+      <div id="roleBadges" class="role-badges"></div>
       <button id="discordLogin">Discord Login</button>
       <button id="logoutBtn" class="secondary hidden">Logout</button>
       <span id="loginStatus">Nicht eingeloggt</span>
@@ -29,7 +31,8 @@
       <div id="panelToggle">☰</div>
 
       <div class="tabs">
-        <button class="tab admin-only hidden" data-tab="editor">Editor</button>
+        <button class="tab editor-only hidden" data-tab="editor">Editor</button>
+        <button class="tab dashboard-only hidden" data-tab="dashboard">Dashboard</button>
         <button class="tab active" data-tab="filter">Filter</button>
         <button class="tab" data-tab="stats">Statistik</button>
         <button class="tab admin-only hidden" data-tab="export">Export</button>
@@ -37,11 +40,11 @@
         <button class="tab vip-only hidden" data-tab="vip">VIP</button>
       </div>
 
-      <div class="tab-content admin-only hidden" id="editor">
+      <div class="tab-content editor-only hidden" id="editor">
         <h2>Marker Editor</h2>
 
         <div class="status-box" id="roleInfo">
-          Discord Login nötig. Marker erstellen/bearbeiten nur mit Admin-Rolle.
+          Discord Login nötig. Marker erstellen/bearbeiten nur mit Admin- oder Mapper-Rolle.
         </div>
 
         <div id="appMessage" class="message-box hidden"></div>
@@ -170,6 +173,61 @@
         </div>
       </div>
 
+      <div class="tab-content dashboard-only hidden" id="dashboard">
+        <h2>Control Center</h2>
+
+        <div class="status-box" id="dashboardStatus">
+          Live-Übersicht für Admin / Support.
+        </div>
+
+        <div class="button-row">
+          <button id="refreshDashboardBtn">Dashboard aktualisieren</button>
+          <button id="createBackupBtn" class="secondary admin-only hidden">Backup jetzt erstellen</button>
+        </div>
+
+        <div class="dashboard-grid">
+          <div class="dashboard-card">
+            <div class="dashboard-label">Marker gesamt</div>
+            <div id="dashboardTotalMarkers" class="dashboard-value">0</div>
+          </div>
+          <div class="dashboard-card">
+            <div class="dashboard-label">Favoriten</div>
+            <div id="dashboardFavorites" class="dashboard-value">0</div>
+          </div>
+          <div class="dashboard-card">
+            <div class="dashboard-label">Fraktionsgebiete</div>
+            <div id="dashboardTerritories" class="dashboard-value">0</div>
+          </div>
+          <div class="dashboard-card">
+            <div class="dashboard-label">Schwarzmarkt</div>
+            <div id="dashboardBlackmarket" class="dashboard-value">0</div>
+          </div>
+        </div>
+
+        <div class="dashboard-columns">
+          <div class="dashboard-panel">
+            <h3>Top Zuständigkeiten</h3>
+            <div id="dashboardTopOwners" class="dashboard-list">
+              <div class="status-box">Noch keine Daten.</div>
+            </div>
+          </div>
+
+          <div class="dashboard-panel">
+            <h3>Letzte Änderungen</h3>
+            <div id="dashboardRecentChanges" class="dashboard-list">
+              <div class="status-box">Noch keine Daten.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="dashboard-panel">
+          <h3>Backups</h3>
+          <div id="dashboardBackups" class="dashboard-list">
+            <div class="status-box">Noch keine Backups.</div>
+          </div>
+        </div>
+      </div>
+
       <div class="tab-content" id="stats">
         <h2>Statistik</h2>
 
@@ -196,6 +254,7 @@
         <div class="button-column">
           <button id="exportAllBtn">Alle Marker exportieren</button>
           <button id="exportVisibleBtn" class="secondary">Sichtbare Marker exportieren</button>
+          <button id="exportBackupBtn" class="secondary">Letztes Backup anzeigen</button>
         </div>
 
         <hr>
