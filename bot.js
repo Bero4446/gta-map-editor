@@ -55,23 +55,41 @@ function closeTicketRow() {
   );
 }
 
-async function ensureSetupMessage(channelId, marker, content, row) {
+function messageHasButton(message, buttonCustomId) {
+  return message.components?.some((actionRow) =>
+    actionRow.components?.some((component) => component.customId === buttonCustomId)
+  );
+}
+
+async function ensureSetupMessage(channelId, buttonCustomId, content, row) {
   if (!channelId) return;
 
   const channel = await client.channels.fetch(channelId).catch(() => null);
   if (!channel || !channel.isTextBased()) return;
 
-  const messages = await channel.messages.fetch({ limit: 20 }).catch(() => null);
-  const alreadyExists = messages?.find(
-    (msg) => msg.author.id === client.user.id && msg.content.includes(marker)
+  const messages = await channel.messages.fetch({ limit: 50 }).catch(() => null);
+  const existing = messages?.find(
+    (msg) => msg.author.id === client.user.id && messageHasButton(msg, buttonCustomId)
   );
 
-  if (alreadyExists) return;
-
-  await channel.send({
-    content: `${marker}\n${content}`,
+  const payload = {
+    content,
     components: [row],
-  });
+    allowedMentions: { parse: ['everyone'] },
+  };
+
+  if (existing) {
+    const sameContent = existing.content === content;
+    const sameButton = messageHasButton(existing, buttonCustomId);
+
+    if (!sameContent || !sameButton) {
+      await existing.edit(payload).catch(console.error);
+    }
+
+    return;
+  }
+
+  await channel.send(payload).catch(console.error);
 }
 
 client.once('ready', async () => {
@@ -86,15 +104,15 @@ client.once('ready', async () => {
 
   await ensureSetupMessage(
     VERIFY_CHANNEL_ID,
-    '[VERIFY_SETUP]',
-    'Klicke auf den Button, um dich zu verifizieren.',
+    'verify_btn',
+    '@everyone\nKlicke auf den Button, um dich zu verifizieren.',
     verifyRow()
   );
 
   await ensureSetupMessage(
     SUPPORT_CHANNEL_ID,
-    '[TICKET_SETUP]',
-    'Brauchst du Hilfe? Klicke auf den Button und der Bot erstellt ein Ticket.',
+    'ticket_open_btn',
+    '@everyone\nBrauchst du Hilfe? Klicke auf den Button und der Bot erstellt ein Ticket.',
     ticketRow()
   );
 });
@@ -113,7 +131,6 @@ client.on('guildMemberAdd', async (member) => {
 client.on('interactionCreate', async (interaction) => {
   if (!interaction.isButton()) return;
 
-  // VERIFY
   if (interaction.customId === 'verify_btn') {
     const role = interaction.guild.roles.cache.get(VERIFIED_ROLE_ID);
 
@@ -147,7 +164,6 @@ client.on('interactionCreate', async (interaction) => {
     }
   }
 
-  // TICKET ERSTELLEN
   if (interaction.customId === 'ticket_open_btn') {
     const existing = interaction.guild.channels.cache.find(
       (channel) =>
@@ -232,7 +248,6 @@ client.on('interactionCreate', async (interaction) => {
     }
   }
 
-  // TICKET SCHLIESSEN
   if (interaction.customId === 'ticket_close_btn') {
     const ticketOwnerId = interaction.channel.topic?.replace('ticket:', '');
     const isAdmin = ADMIN_ROLE_ID
