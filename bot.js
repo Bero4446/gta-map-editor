@@ -8,12 +8,15 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  AttachmentBuilder,
 } = require('discord.js');
 
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
   ],
 });
 
@@ -27,7 +30,11 @@ const {
   ADMIN_ROLE_ID,
   SUPPORT_CATEGORY_ID,
   TICKET_LOG_CHANNEL_ID,
+  SUPPORT_PING_ROLE_ID,
+  DISCORD_SUPPORT_ROLE_ID,
 } = process.env;
+
+const EFFECTIVE_SUPPORT_ROLE_ID = SUPPORT_PING_ROLE_ID || DISCORD_SUPPORT_ROLE_ID || "";
 
 function verifyRow() {
   return new ActionRowBuilder().addComponents(
@@ -77,17 +84,30 @@ function parseTicketTopic(topic) {
 function formatDuration(ms) {
   if (!ms || ms < 1000) return 'unter 1 Minute';
   const totalMinutes = Math.floor(ms / 60000);
-  const hours = Math.floor(totalMinutes / 60);
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
   const minutes = totalMinutes % 60;
-  if (!hours) return `${minutes} Minute(n)`;
-  return `${hours} Std. ${minutes} Min.`;
+  const parts = [];
+  if (days) parts.push(`${days} Tag(e)`);
+  if (hours) parts.push(`${hours} Std.`);
+  if (minutes || !parts.length) parts.push(`${minutes} Min.`);
+  return parts.join(' ');
 }
 
-async function logTicketEvent(content) {
-  if (!TICKET_LOG_CHANNEL_ID) return;
+async function getTicketLogChannel() {
+  if (!TICKET_LOG_CHANNEL_ID) return null;
   const channel = await client.channels.fetch(TICKET_LOG_CHANNEL_ID).catch(() => null);
-  if (!channel || !channel.isTextBased()) return;
-  await channel.send({ content }).catch(console.error);
+  return channel && channel.isTextBased() ? channel : null;
+}
+
+async function logTicketEvent(content, extra = {}) {
+  const channel = await getTicketLogChannel();
+  if (!channel) return;
+  await channel.send({
+    content,
+    files: extra.files || [],
+    allowedMentions: { parse: [] },
+  }).catch(console.error);
 }
 
 async function ensureSetupMessage(channelId, buttonCustomId, content, row) {
@@ -115,6 +135,41 @@ async function ensureSetupMessage(channelId, buttonCustomId, content, row) {
   }
 
   await channel.send(payload).catch(console.error);
+}
+
+async function buildTranscript(channel) {
+  const pages = [];
+  let lastId;
+
+  for (let i = 0; i < 5; i += 1) {
+    const batch = await channel.messages.fetch({ limit: 100, before: lastId }).catch(() => null);
+    if (!batch || !batch.size) break;
+    pages.push(...Array.from(batch.values()));
+    lastId = batch.last()?.id;
+    if (batch.size < 100) break;
+  }
+
+  const messages = pages
+    .sort((a, b) => a.createdTimestamp - b.createdTimestamp)
+    .map((msg) => {
+      const createdAt = new Date(msg.createdTimestamp).toLocaleString('de-DE');
+      const attachments = msg.attachments.size
+        ? ` | Anhänge: ${Array.from(msg.attachments.values()).map((a) => a.url).join(', ')}`
+        : '';
+      const content = (msg.content || '')
+        .replace(/\r/g, '')
+        .trim();
+      const cleanContent = content || '[keine Textnachricht]';
+      return `[${createdAt}] ${msg.author?.tag || 'Unbekannt'}: ${cleanContent}${attachments}`;
+    });
+
+  const header = [
+    `Ticket-Transcript: #${channel.name}`,
+    `Erstellt: ${new Date().toLocaleString('de-DE')}`,
+    '',
+  ];
+
+  return Buffer.from([...header, ...messages].join('\n'), 'utf8');
 }
 
 client.once('ready', async () => {
@@ -246,6 +301,17 @@ client.on('interactionCreate', async (interaction) => {
       });
     }
 
+    if (EFFECTIVE_SUPPORT_ROLE_ID) {
+      overwrites.push({
+        id: EFFECTIVE_SUPPORT_ROLE_ID,
+        allow: [
+          PermissionsBitField.Flags.ViewChannel,
+          PermissionsBitField.Flags.SendMessages,
+          PermissionsBitField.Flags.ReadMessageHistory,
+        ],
+      });
+    }
+
     try {
       const ticketChannel = await interaction.guild.channels.create({
         name: `ticket-${safeName}`,
@@ -255,13 +321,15 @@ client.on('interactionCreate', async (interaction) => {
         permissionOverwrites: overwrites,
       });
 
+      const supportPing = EFFECTIVE_SUPPORT_ROLE_ID ? `<@&${EFFECTIVE_SUPPORT_ROLE_ID}> ` : '';
       await ticketChannel.send({
-        content: `🎫 Hallo ${interaction.user}, ein Admin meldet sich hier.\nDrücke unten auf **Ticket schließen**, wenn alles erledigt ist.`,
+        content: `${supportPing}🎫 Hallo ${interaction.user}, ein Teammitglied meldet sich hier.\nDrücke unten auf **Ticket schließen**, wenn alles erledigt ist.`,
         components: [closeTicketRow()],
+        allowedMentions: { roles: EFFECTIVE_SUPPORT_ROLE_ID ? [EFFECTIVE_SUPPORT_ROLE_ID] : [] },
       });
 
       await logTicketEvent(
-        `🟢 Ticket erstellt\n**User:** ${interaction.user.tag}\n**Channel:** ${ticketChannel}\n**Zeit:** <t:${Math.floor(createdAt / 1000)}:F>`
+        `🟢 Ticket erstellt\n**User:** ${interaction.user.tag}\n**Channel:** ${ticketChannel}\n**Zeit:** <t:${Math.floor(createdAt / 1000)}:F>\n**Support-Ping:** ${EFFECTIVE_SUPPORT_ROLE_ID ? `<@&${EFFECTIVE_SUPPORT_ROLE_ID}>` : 'nicht gesetzt'}`
       );
 
       return interaction.reply({
@@ -282,8 +350,9 @@ client.on('interactionCreate', async (interaction) => {
     const isAdmin = ADMIN_ROLE_ID
       ? interaction.member.roles.cache.has(ADMIN_ROLE_ID)
       : false;
+    const isOwner = interaction.user.id === ticketInfo.ownerId;
 
-    if (interaction.user.id !== ticketInfo.ownerId && !isAdmin) {
+    if (!isOwner && !isAdmin) {
       return interaction.reply({
         content: '❌ Du darfst dieses Ticket nicht schließen.',
         ephemeral: true,
@@ -291,16 +360,26 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     await interaction.reply({
-      content: '🗑️ Ticket wird geschlossen...',
+      content: '🗑️ Ticket wird geschlossen und archiviert...',
       ephemeral: true,
     });
 
     const openedAt = ticketInfo.createdAt ? new Date(ticketInfo.createdAt) : null;
     const duration = openedAt ? formatDuration(Date.now() - openedAt.getTime()) : 'unbekannt';
     const ownerMention = ticketInfo.ownerId ? `<@${ticketInfo.ownerId}>` : 'Unbekannt';
+    const transcriptBuffer = await buildTranscript(interaction.channel).catch(() => null);
+
+    const files = transcriptBuffer
+      ? [
+          new AttachmentBuilder(transcriptBuffer, {
+            name: `${interaction.channel.name}-transcript.txt`,
+          }),
+        ]
+      : [];
 
     await logTicketEvent(
-      `🔴 Ticket geschlossen\n**User:** ${ownerMention}\n**Channel:** #${interaction.channel.name}\n**Geschlossen von:** ${interaction.user.tag}\n**Dauer:** ${duration}`
+      `🔴 Ticket geschlossen\n**User:** ${ownerMention}\n**Channel:** #${interaction.channel.name}\n**Geschlossen von:** ${interaction.user.tag}\n**Dauer:** ${duration}`,
+      { files }
     );
 
     setTimeout(async () => {
