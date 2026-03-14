@@ -15,6 +15,7 @@
     <div class="logo">GTA RP MAP</div>
 
     <div class="top-actions">
+      <input id="globalSearch" class="top-search" placeholder="🔍 Marker suchen" />
       <button id="discordLogin">Discord Login</button>
       <button id="logoutBtn" class="secondary hidden">Logout</button>
       <span id="loginStatus">Nicht eingeloggt</span>
@@ -49,10 +50,8 @@
           Du bearbeitest gerade einen Marker.
         </div>
 
-        <input id="markerSearch" placeholder="🔍 Marker suchen" />
-
+        <input id="markerSearch" placeholder="🔎 Admin-Schnellsuche" />
         <input id="markerName" placeholder="Name" />
-
         <textarea id="markerDescription" placeholder="Beschreibung"></textarea>
 
         <select id="markerCategory">
@@ -64,6 +63,7 @@
           <option value="Fraktions Krankenhaus">🏥 Fraktions Krankenhaus</option>
           <option value="Systempunkteshop">🛒 Systempunkteshop</option>
           <option value="Fraktion">🛡️ Fraktion</option>
+          <option value="Fraktionsgebiet">🗺️ Fraktionsgebiet</option>
         </select>
 
         <input id="markerOwner" placeholder="Besitzer / Zuständigkeit (nur Admin sichtbar)" />
@@ -72,6 +72,11 @@
           <input type="checkbox" id="markerFavorite" />
           ⭐ Als Favorit markieren
         </label>
+
+        <div id="markerRadiusWrap" class="hidden">
+          <input id="markerRadius" type="number" min="50" step="50" placeholder="Gebietsradius in Metern" />
+          <div class="coord-info">Fraktionsgebiete werden als Kreis um den Marker-Mittelpunkt angezeigt.</div>
+        </div>
 
         <div class="coord-row">
           <input id="markerLat" placeholder="Lat" />
@@ -96,6 +101,10 @@
 
       <div class="tab-content active" id="filter">
         <h2>Filter</h2>
+
+        <div class="status-box">
+          Suche nach Namen, Beschreibung oder Kategorie. Admins können zusätzlich nach Besitzer/Zuständigkeit suchen.
+        </div>
 
         <label class="check">
           <input type="checkbox" checked data-filter="Dealer" />
@@ -138,9 +147,27 @@
         </label>
 
         <label class="check">
+          <input type="checkbox" checked data-filter="Fraktionsgebiet" />
+          🗺️ Fraktionsgebiet
+        </label>
+
+        <label class="check">
           <input type="checkbox" id="favoritesOnly" />
           ⭐ Nur Favoriten anzeigen
         </label>
+
+        <div class="admin-only hidden">
+          <input id="ownerFilter" placeholder="Besitzer / Zuständigkeit filtern" />
+          <label class="check">
+            <input type="checkbox" id="myMarkersOnly" />
+            👤 Nur meine Zuständigkeit
+          </label>
+        </div>
+
+        <h3>Treffer</h3>
+        <div id="searchResults" class="search-results">
+          <div class="status-box">Gib oben einen Suchbegriff ein oder nutze die Filter.</div>
+        </div>
       </div>
 
       <div class="tab-content" id="stats">
@@ -155,6 +182,7 @@
         <div id="statHospital" class="stat-card">Fraktions Krankenhaus: 0</div>
         <div id="statPointShop" class="stat-card">Systempunkteshop: 0</div>
         <div id="statFaction" class="stat-card">Fraktion: 0</div>
+        <div id="statTerritory" class="stat-card">Fraktionsgebiete: 0</div>
         <div id="statVip" class="stat-card vip-only hidden">Schwarzmarkt: 0</div>
       </div>
 
@@ -187,7 +215,7 @@
         <h2 id="historyTitle">Verlauf</h2>
 
         <div id="historyHint" class="status-box">
-          Wähle einen Marker aus, um seinen Verlauf zu sehen.
+          Wähle einen Marker aus, um seinen Verlauf zu sehen und alte Versionen wiederherzustellen.
         </div>
 
         <div id="historyList">
