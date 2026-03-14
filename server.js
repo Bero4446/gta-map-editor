@@ -18,7 +18,7 @@ const PUBLIC_DIR = path.join(__dirname, "public");
 const MARKERS_FILE = path.join(__dirname, "markers.json");
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL || "";
 const DATABASE_URL = process.env.DATABASE_URL;
-const ALLOWED_CATEGORIES = ["Dealer", "UG", "Feld", "Workstation", "Schwarzmarkt"];
+const ALLOWED_CATEGORIES = ["Dealer", "UG", "Feld", "Workstation", "Schwarzmarkt", "Fraktions Krankenhaus", "Systempunkteshop", "Fraktion"];
 
 if (!fs.existsSync(PUBLIC_DIR)) {
   fs.mkdirSync(PUBLIC_DIR, { recursive: true });
@@ -883,4 +883,3 @@ async function startServer() {
 }
 
 startServer();
-
