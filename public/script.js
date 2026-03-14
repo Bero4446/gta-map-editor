@@ -38,8 +38,17 @@ let currentUser = {
   username: "",
   isVip: false,
   isAdmin: false,
+  isSupport: false,
+  isMapper: false,
+  canEdit: false,
+  canViewDashboard: false,
+  roleNames: [],
   id: ""
 };
+
+let dashboardState = null;
+let liveSyncSource = null;
+let lastSyncMessageAt = null;
 
 const icons = Object.fromEntries(
   Object.entries(CATEGORY_META).map(([key, meta]) => [key, createEmojiIcon(meta.icon)])
@@ -78,8 +87,24 @@ function isVipOrAdmin() {
   return !!currentUser.loggedIn && (!!currentUser.isVip || !!currentUser.isAdmin);
 }
 
+function isSupport() {
+  return !!currentUser.loggedIn && !!currentUser.isSupport;
+}
+
+function isMapper() {
+  return !!currentUser.loggedIn && !!currentUser.isMapper;
+}
+
+function canEditMarkers() {
+  return !!currentUser.loggedIn && !!currentUser.canEdit;
+}
+
+function canViewDashboard() {
+  return !!currentUser.loggedIn && !!currentUser.canViewDashboard;
+}
+
 function canAccessAdminArea() {
-  return !!currentUser.loggedIn && !!currentUser.isAdmin;
+  return canEditMarkers();
 }
 
 function roundCoord(value) {
@@ -126,7 +151,7 @@ function getSearchValue() {
 }
 
 function getOwnerFilterValue() {
-  if (!isAdmin()) return "";
+  if (!canEditMarkers()) return "";
   return document.getElementById("ownerFilter")?.value.trim().toLowerCase() || "";
 }
 
@@ -138,7 +163,7 @@ function getRadiusValueFromForm() {
 
 function getSearchText(marker) {
   const base = `${marker.name} ${marker.description} ${marker.category}`.toLowerCase();
-  if (!isAdmin()) return base;
+  if (!canEditMarkers()) return base;
   return `${base} ${marker.owner || ""}`.toLowerCase();
 }
 
@@ -147,7 +172,7 @@ function shouldShowMarker(marker) {
   const searchValue = getSearchValue();
   const favoritesOnly = !!document.getElementById("favoritesOnly")?.checked;
   const ownerFilter = getOwnerFilterValue();
-  const myMarkersOnly = isAdmin() && !!document.getElementById("myMarkersOnly")?.checked;
+  const myMarkersOnly = canEditMarkers() && !!document.getElementById("myMarkersOnly")?.checked;
 
   if (!activeFilters.includes(marker.category)) return false;
   if (marker.category === "Schwarzmarkt" && !isVipOrAdmin()) return false;
@@ -266,6 +291,11 @@ async function fetchUser() {
       username: "",
       isVip: false,
       isAdmin: false,
+      isSupport: false,
+      isMapper: false,
+      canEdit: false,
+      canViewDashboard: false,
+      roleNames: [],
       id: ""
     };
   }
@@ -279,31 +309,46 @@ function updateUserUi() {
   const logoutBtn = document.getElementById("logoutBtn");
   const vipElements = document.querySelectorAll(".vip-only");
   const adminElements = document.querySelectorAll(".admin-only");
+  const editorElements = document.querySelectorAll(".editor-only");
+  const dashboardElements = document.querySelectorAll(".dashboard-only");
   const saveButton = document.getElementById("saveMarker");
   const historyHint = document.getElementById("historyHint");
+  const roleBadges = document.getElementById("roleBadges");
+
+  if (roleBadges) {
+    roleBadges.innerHTML = "";
+  }
 
   if (!currentUser.loggedIn) {
     if (loginStatus) loginStatus.textContent = "Nicht eingeloggt";
-    if (roleInfo) roleInfo.textContent = "Discord Login nötig. Marker erstellen/bearbeiten nur mit Admin-Rolle.";
+    if (roleInfo) roleInfo.textContent = "Discord Login nötig. Marker erstellen/bearbeiten nur mit Admin- oder Mapper-Rolle.";
     if (logoutBtn) logoutBtn.classList.add("hidden");
     if (historyHint) historyHint.textContent = "Historie erst nach Admin-Login sichtbar.";
 
     vipElements.forEach((el) => el.classList.add("hidden"));
     adminElements.forEach((el) => el.classList.add("hidden"));
+    editorElements.forEach((el) => el.classList.add("hidden"));
+    dashboardElements.forEach((el) => el.classList.add("hidden"));
 
     if (saveButton) {
       saveButton.disabled = true;
-      saveButton.textContent = "Nur Admin";
+      saveButton.textContent = "Nur Admin / Mapper";
     }
 
     ensureAllowedActiveTab();
     renderSearchResults();
+    renderDashboard();
     return;
   }
 
-  const roles = [];
-  if (currentUser.isAdmin) roles.push("Admin");
-  if (currentUser.isVip) roles.push("VIP");
+  const roles = Array.isArray(currentUser.roleNames) && currentUser.roleNames.length
+    ? currentUser.roleNames
+    : [
+        currentUser.isAdmin ? "Admin" : "",
+        currentUser.isSupport ? "Support" : "",
+        currentUser.isMapper ? "Mapper" : "",
+        currentUser.isVip ? "VIP" : ""
+      ].filter(Boolean);
 
   if (loginStatus) loginStatus.textContent = `👤 ${currentUser.username}`;
   if (roleInfo) {
@@ -317,6 +362,10 @@ function updateUserUi() {
       : "Historie nur für Admins sichtbar.";
   }
 
+  if (roleBadges) {
+    roleBadges.innerHTML = roles.map((role) => `<span class="role-badge">${escapeHtml(role)}</span>`).join("");
+  }
+
   if (logoutBtn) logoutBtn.classList.remove("hidden");
 
   if (isVipOrAdmin()) {
@@ -325,24 +374,37 @@ function updateUserUi() {
     vipElements.forEach((el) => el.classList.add("hidden"));
   }
 
-  if (canAccessAdminArea()) {
+  if (isAdmin()) {
     adminElements.forEach((el) => el.classList.remove("hidden"));
   } else {
     adminElements.forEach((el) => el.classList.add("hidden"));
   }
 
+  if (canEditMarkers()) {
+    editorElements.forEach((el) => el.classList.remove("hidden"));
+  } else {
+    editorElements.forEach((el) => el.classList.add("hidden"));
+  }
+
+  if (canViewDashboard()) {
+    dashboardElements.forEach((el) => el.classList.remove("hidden"));
+  } else {
+    dashboardElements.forEach((el) => el.classList.add("hidden"));
+  }
+
   if (saveButton) {
-    if (isAdmin()) {
+    if (canEditMarkers()) {
       saveButton.disabled = false;
       saveButton.textContent = selectedMarkerId ? "Änderungen speichern" : "Speichern";
     } else {
       saveButton.disabled = true;
-      saveButton.textContent = "Nur Admin";
+      saveButton.textContent = "Nur Admin / Mapper";
     }
   }
 
   ensureAllowedActiveTab();
   renderSearchResults();
+  renderDashboard();
 }
 
 async function loadMarkers() {
@@ -380,6 +442,10 @@ async function saveMarkers() {
   if (Array.isArray(data.markers)) {
     markers = data.markers;
   }
+
+  if (canViewDashboard()) {
+    fetchDashboard().catch(() => {});
+  }
 }
 
 function buildPopupHtml(marker) {
@@ -399,7 +465,7 @@ function buildPopupHtml(marker) {
     `
     : "";
 
-  const ownerHtml = isAdmin()
+  const ownerHtml = canEditMarkers()
     ? `<div class="popup-meta">Besitzer/Zuständigkeit: ${escapeHtml(marker.owner || "-")}</div>`
     : "";
 
@@ -411,17 +477,18 @@ function buildPopupHtml(marker) {
     ? `<div class="popup-meta">Gebietsradius: ${escapeHtml(formatValue(marker.radius || 200))} m</div>`
     : "";
 
-  const adminButtons = isAdmin()
+  const adminButtons = canEditMarkers()
     ? `
       <button onclick="window.editMarker('${marker.id}')">Bearbeiten</button>
       <button onclick="window.toggleMarkerFavorite('${marker.id}')">${marker.favorite ? "Favorit entfernen" : "Als Favorit"}</button>
-      <button onclick="window.showMarkerHistory('${marker.id}')">Verlauf</button>
+      <button class="secondary" onclick="window.duplicateMarker('${marker.id}')">Duplizieren</button>
+      ${isAdmin() ? `<button onclick="window.showMarkerHistory('${marker.id}')">Verlauf</button>` : ""}
       <button class="secondary" onclick="window.copyMarkerOwner('${marker.id}')">Besitzer kopieren</button>
-      <button class="secondary" onclick="window.deleteMarker('${marker.id}')">Löschen</button>
+      ${isAdmin() ? `<button class="secondary" onclick="window.deleteMarker('${marker.id}')">Löschen</button>` : ""}
     `
     : "";
 
-  const adminMeta = isAdmin()
+  const adminMeta = canEditMarkers()
     ? `
       <div class="popup-meta">Erstellt von: ${escapeHtml(marker.createdBy || "-")}</div>
       <div class="popup-meta">Zuletzt geändert von: ${escapeHtml(marker.updatedBy || "-")}</div>
@@ -511,7 +578,7 @@ function renderMarkers() {
 
     const markerLayer = L.marker([Number(marker.lat), Number(marker.lng)], {
       icon: icons[marker.category] || icons.Dealer,
-      draggable: isAdmin(),
+      draggable: canEditMarkers(),
       title: marker.favorite ? `⭐ ${marker.name}` : marker.name
     });
 
@@ -529,7 +596,7 @@ function renderMarkers() {
     });
 
     markerLayer.on("dragend", async (e) => {
-      if (!isAdmin()) return;
+      if (!canEditMarkers()) return;
 
       try {
         const pos = e.target.getLatLng();
@@ -597,7 +664,11 @@ function renderSearchResults() {
 
   const sortedCategories = categoryOrder
     .filter((category) => grouped.has(category))
-    .concat([...grouped.keys()].filter((category) => !categoryOrder.includes(category)).sort((a, b) => a.localeCompare(b, "de")));
+    .concat(
+      [...grouped.keys()]
+        .filter((category) => !categoryOrder.includes(category))
+        .sort((a, b) => a.localeCompare(b, "de"))
+    );
 
   list.innerHTML = sortedCategories.map((category, index) => {
     const items = grouped.get(category) || [];
@@ -605,7 +676,10 @@ function renderSearchResults() {
     const isOpen = searchValue ? "open" : index === 0 ? "open" : "";
 
     const cards = items.map((marker) => {
-      const owner = isAdmin() ? `<div class="search-result-meta">Besitzer: ${escapeHtml(marker.owner || "-")}</div>` : "";
+      const owner = canEditMarkers()
+        ? `<div class="search-result-meta">Besitzer: ${escapeHtml(marker.owner || "-")}</div>`
+        : "";
+
       const territory = marker.category === "Fraktionsgebiet"
         ? `<div class="search-result-meta">Radius: ${escapeHtml(formatValue(marker.radius || 200))} m</div>`
         : "";
@@ -618,7 +692,9 @@ function renderSearchResults() {
           ${territory}
           <div class="search-result-actions">
             <button onclick="window.focusMarker('${marker.id}')">Auf Karte</button>
-            ${isAdmin() ? `<button class="secondary" onclick="window.editMarker('${marker.id}')">Bearbeiten</button>` : ""}
+            <button class="secondary" onclick="window.copyMarkerCoords('${marker.id}')">Koords</button>
+            ${canEditMarkers() ? `<button class="secondary" onclick="window.editMarker('${marker.id}')">Bearbeiten</button>` : ""}
+            ${canEditMarkers() ? `<button class="secondary" onclick="window.duplicateMarker('${marker.id}')">Duplizieren</button>` : ""}
             ${isAdmin() ? `<button class="secondary" onclick="window.showMarkerHistory('${marker.id}')">Verlauf</button>` : ""}
           </div>
         </div>
@@ -681,7 +757,7 @@ window.copyMarkerCoords = function (id) {
 };
 
 window.copyMarkerOwner = function (id) {
-  if (!isAdmin()) return;
+  if (!canEditMarkers()) return;
   const marker = markers.find((m) => m.id === id);
   if (!marker) {
     showMessage("Marker nicht gefunden.", "error");
@@ -811,7 +887,7 @@ function cryptoRandomId() {
 }
 
 window.editMarker = function (id) {
-  if (!isAdmin()) return;
+  if (!canEditMarkers()) return;
 
   const marker = markers.find((m) => m.id === id);
   if (!marker) {
@@ -825,7 +901,7 @@ window.editMarker = function (id) {
 };
 
 window.toggleMarkerFavorite = async function (id) {
-  if (!isAdmin()) return;
+  if (!canEditMarkers()) return;
 
   const marker = markers.find((m) => m.id === id);
   if (!marker) {
@@ -846,6 +922,38 @@ window.toggleMarkerFavorite = async function (id) {
     console.error(error);
     showMessage("Favorit konnte nicht gespeichert werden.", "error");
   }
+};
+
+
+window.duplicateMarker = async function (id) {
+  if (!canEditMarkers()) return;
+
+  const marker = markers.find((m) => m.id === id);
+  if (!marker) {
+    showMessage("Marker nicht gefunden.", "error");
+    return;
+  }
+
+  const now = new Date().toISOString();
+  const duplicate = {
+    ...marker,
+    id: `${marker.id}-copy-${Date.now()}`,
+    name: `${marker.name} Kopie`,
+    lat: roundCoord(Number(marker.lat) + 35),
+    lng: roundCoord(Number(marker.lng) + 35),
+    createdAt: now,
+    updatedAt: now,
+    createdBy: currentUser.username,
+    updatedBy: currentUser.username
+  };
+
+  markers.unshift(duplicate);
+  await saveMarkers();
+  renderMarkers();
+  updateStats();
+  renderSearchResults();
+  fillForm(duplicate);
+  showMessage("Marker dupliziert.");
 };
 
 window.deleteMarker = async function (id) {
@@ -1019,6 +1127,181 @@ async function importMarkersFromFile() {
   }
 }
 
+
+function setSyncStatus(state = "offline", label = "Offline") {
+  const el = document.getElementById("syncStatus");
+  if (!el) return;
+  el.className = `sync-pill ${state}`;
+  el.textContent = `● ${label}`;
+}
+
+async function fetchDashboard() {
+  if (!canViewDashboard()) {
+    dashboardState = null;
+    renderDashboard();
+    return;
+  }
+
+  try {
+    const res = await fetch("/api/admin-dashboard");
+    const data = await res.json();
+
+    if (!res.ok || data.success === false) {
+      throw new Error(data.error || "Dashboard konnte nicht geladen werden.");
+    }
+
+    dashboardState = data;
+    renderDashboard();
+  } catch (error) {
+    console.error(error);
+    showMessage(error.message || "Dashboard konnte nicht geladen werden.", "error");
+  }
+}
+
+function renderDashboard() {
+  const totalEl = document.getElementById("dashboardTotalMarkers");
+  const favoritesEl = document.getElementById("dashboardFavorites");
+  const territoriesEl = document.getElementById("dashboardTerritories");
+  const blackmarketEl = document.getElementById("dashboardBlackmarket");
+  const ownersEl = document.getElementById("dashboardTopOwners");
+  const changesEl = document.getElementById("dashboardRecentChanges");
+  const backupsEl = document.getElementById("dashboardBackups");
+  const statusEl = document.getElementById("dashboardStatus");
+
+  if (!totalEl || !favoritesEl || !territoriesEl || !blackmarketEl || !ownersEl || !changesEl || !backupsEl || !statusEl) return;
+
+  if (!canViewDashboard()) {
+    totalEl.textContent = "0";
+    favoritesEl.textContent = "0";
+    territoriesEl.textContent = "0";
+    blackmarketEl.textContent = "0";
+    ownersEl.innerHTML = `<div class="status-box">Dashboard nur für berechtigte Rollen sichtbar.</div>`;
+    changesEl.innerHTML = `<div class="status-box">Keine Daten.</div>`;
+    backupsEl.innerHTML = `<div class="status-box">Keine Daten.</div>`;
+    statusEl.textContent = "Live-Übersicht für Admin / Support.";
+    return;
+  }
+
+  if (!dashboardState) {
+    ownersEl.innerHTML = `<div class="status-box">Dashboard wird geladen...</div>`;
+    changesEl.innerHTML = `<div class="status-box">Dashboard wird geladen...</div>`;
+    backupsEl.innerHTML = `<div class="status-box">Dashboard wird geladen...</div>`;
+    return;
+  }
+
+  const metrics = dashboardState.metrics || {};
+  totalEl.textContent = String(metrics.totalMarkers || 0);
+  favoritesEl.textContent = String(metrics.favorites || 0);
+  territoriesEl.textContent = String(metrics.territories || 0);
+  blackmarketEl.textContent = String(metrics.blackmarket || 0);
+  statusEl.textContent = lastSyncMessageAt
+    ? `Live-Sync aktiv • letzte Aktualisierung ${formatDateTime(lastSyncMessageAt)}`
+    : "Live-Sync aktiv";
+
+  const topOwners = Array.isArray(dashboardState.topOwners) ? dashboardState.topOwners : [];
+  ownersEl.innerHTML = topOwners.length
+    ? topOwners.map((entry) => `
+        <div class="dashboard-item">
+          <strong>${escapeHtml(entry.owner)}</strong>
+          <span>${escapeHtml(String(entry.count))} Marker</span>
+        </div>
+      `).join("")
+    : `<div class="status-box">Noch keine Zuständigkeiten.</div>`;
+
+  const recentChanges = Array.isArray(dashboardState.recentChanges) ? dashboardState.recentChanges : [];
+  changesEl.innerHTML = recentChanges.length
+    ? recentChanges.map((entry) => `
+        <div class="dashboard-item dashboard-item-stack">
+          <strong>${escapeHtml(entry.markerName || entry.markerId)}</strong>
+          <span>${escapeHtml(entry.action)} • ${escapeHtml(entry.adminName || "-")}</span>
+          <small>${escapeHtml(formatDateTime(entry.createdAt))}</small>
+        </div>
+      `).join("")
+    : `<div class="status-box">Noch keine Änderungen.</div>`;
+
+  const backups = Array.isArray(dashboardState.backups) ? dashboardState.backups : [];
+  backupsEl.innerHTML = backups.length
+    ? backups.map((entry, index) => `
+        <div class="dashboard-item">
+          <div>
+            <strong>${escapeHtml(entry.file)}</strong>
+            <div class="dashboard-meta">${escapeHtml(formatDateTime(entry.createdAt))}</div>
+          </div>
+          ${isAdmin() ? `<button class="secondary" onclick="window.downloadBackup('${escapeJsString(entry.file)}')">${index === 0 ? "Neueste laden" : "Laden"}</button>` : ""}
+        </div>
+      `).join("")
+    : `<div class="status-box">Noch keine Backups.</div>`;
+}
+
+window.downloadBackup = function (file) {
+  if (!isAdmin()) return;
+  window.location.href = `/api/backups/${encodeURIComponent(file)}`;
+};
+
+window.createManualBackup = async function () {
+  if (!isAdmin()) return;
+
+  try {
+    const res = await fetch("/api/backups/create", { method: "POST" });
+    const data = await res.json();
+    if (!res.ok || data.success === false) {
+      throw new Error(data.error || "Backup konnte nicht erstellt werden.");
+    }
+    await fetchDashboard();
+    showMessage(`Backup erstellt: ${data.backup?.filename || "ok"}`);
+  } catch (error) {
+    console.error(error);
+    showMessage(error.message || "Backup konnte nicht erstellt werden.", "error");
+  }
+};
+
+function startLiveSync() {
+  if (liveSyncSource) {
+    liveSyncSource.close();
+  }
+
+  setSyncStatus("connecting", "Verbinde…");
+  liveSyncSource = new EventSource("/api/stream");
+
+  liveSyncSource.addEventListener("connected", () => {
+    setSyncStatus("online", "Live-Sync");
+  });
+
+  liveSyncSource.addEventListener("markers-updated", async (event) => {
+    lastSyncMessageAt = new Date().toISOString();
+    setSyncStatus("online", "Live-Sync");
+    try {
+      const payload = JSON.parse(event.data || "{}");
+      await loadMarkers();
+      if (canViewDashboard()) {
+        await fetchDashboard();
+      }
+      if (payload.actor && payload.actor !== currentUser.username) {
+        showMessage(`Live-Update von ${payload.actor} übernommen.`);
+      }
+    } catch (error) {
+      console.error(error);
+    }
+  });
+
+  liveSyncSource.addEventListener("backup-created", async () => {
+    lastSyncMessageAt = new Date().toISOString();
+    setSyncStatus("online", "Backup live");
+    if (canViewDashboard()) {
+      await fetchDashboard();
+    }
+  });
+
+  liveSyncSource.addEventListener("ping", () => {
+    setSyncStatus("online", "Live-Sync");
+  });
+
+  liveSyncSource.onerror = () => {
+    setSyncStatus("offline", "Neu verbinden…");
+  };
+}
+
+
 map.on("click", (e) => {
   const latInput = document.getElementById("markerLat");
   const lngInput = document.getElementById("markerLng");
@@ -1073,6 +1356,30 @@ document.getElementById("exportVisibleBtn")?.addEventListener("click", () => {
 });
 
 document.getElementById("importMarkersBtn")?.addEventListener("click", importMarkersFromFile);
+document.getElementById("refreshDashboardBtn")?.addEventListener("click", fetchDashboard);
+document.getElementById("createBackupBtn")?.addEventListener("click", window.createManualBackup);
+document.getElementById("exportBackupBtn")?.addEventListener("click", async () => {
+  if (!isAdmin()) {
+    showMessage("Nur Admins dürfen Backups laden.", "error");
+    return;
+  }
+
+  try {
+    const res = await fetch("/api/backups");
+    const data = await res.json();
+    if (!res.ok || data.success === false) {
+      throw new Error(data.error || "Backups konnten nicht geladen werden.");
+    }
+    const latest = Array.isArray(data.backups) ? data.backups[0] : null;
+    if (!latest) {
+      throw new Error("Kein Backup vorhanden.");
+    }
+    window.downloadBackup(latest.file);
+  } catch (error) {
+    console.error(error);
+    showMessage(error.message || "Backups konnten nicht geladen werden.", "error");
+  }
+});
 
 document.getElementById("markerCategory")?.addEventListener("change", updateRadiusFieldVisibility);
 
@@ -1158,5 +1465,7 @@ document.addEventListener("keydown", (event) => {
 (async function init() {
   await fetchUser();
   await loadMarkers();
+  await fetchDashboard();
   clearForm();
+  startLiveSync();
 })();
