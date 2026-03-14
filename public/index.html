@@ -61,6 +61,9 @@
           <option value="Feld">🌿 Feld</option>
           <option value="Workstation">🖥️ Workstation</option>
           <option value="Schwarzmarkt">🕶 Schwarzmarkt</option>
+          <option value="Fraktions Krankenhaus">🏥 Fraktions Krankenhaus</option>
+          <option value="Systempunkteshop">🛒 Systempunkteshop</option>
+          <option value="Fraktion">🛡️ Fraktion</option>
         </select>
 
         <input id="markerOwner" placeholder="Besitzer / Zuständigkeit (nur Admin sichtbar)" />
@@ -120,6 +123,21 @@
         </label>
 
         <label class="check">
+          <input type="checkbox" checked data-filter="Fraktions Krankenhaus" />
+          🏥 Fraktions Krankenhaus
+        </label>
+
+        <label class="check">
+          <input type="checkbox" checked data-filter="Systempunkteshop" />
+          🛒 Systempunkteshop
+        </label>
+
+        <label class="check">
+          <input type="checkbox" checked data-filter="Fraktion" />
+          🛡️ Fraktion
+        </label>
+
+        <label class="check">
           <input type="checkbox" id="favoritesOnly" />
           ⭐ Nur Favoriten anzeigen
         </label>
@@ -134,6 +152,9 @@
         <div id="statUG" class="stat-card">UG: 0</div>
         <div id="statField" class="stat-card">Felder: 0</div>
         <div id="statWorkstation" class="stat-card">Workstations: 0</div>
+        <div id="statHospital" class="stat-card">Fraktions Krankenhaus: 0</div>
+        <div id="statPointShop" class="stat-card">Systempunkteshop: 0</div>
+        <div id="statFaction" class="stat-card">Fraktion: 0</div>
         <div id="statVip" class="stat-card vip-only hidden">Schwarzmarkt: 0</div>
       </div>
 
