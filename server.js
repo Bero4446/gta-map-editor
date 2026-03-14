@@ -16,8 +16,10 @@ app.set("trust proxy", 1);
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, "public");
 const MARKERS_FILE = path.join(__dirname, "markers.json");
+const BACKUP_DIR = path.join(__dirname, "backups");
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL || "";
 const DATABASE_URL = process.env.DATABASE_URL;
+const AUTO_BACKUP_INTERVAL_MINUTES = Math.max(15, Number(process.env.AUTO_BACKUP_INTERVAL_MINUTES || 360));
 const ALLOWED_CATEGORIES = [
   "Dealer",
   "UG",
@@ -32,6 +34,10 @@ const ALLOWED_CATEGORIES = [
 
 if (!fs.existsSync(PUBLIC_DIR)) {
   fs.mkdirSync(PUBLIC_DIR, { recursive: true });
+}
+
+if (!fs.existsSync(BACKUP_DIR)) {
+  fs.mkdirSync(BACKUP_DIR, { recursive: true });
 }
 
 if (!DATABASE_URL) {
@@ -49,6 +55,8 @@ const pool = new Pool({
 pool.on("error", (error) => {
   console.error("Postgres Pool Fehler:", error.message);
 });
+
+const liveClients = new Set();
 
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
@@ -91,9 +99,16 @@ passport.use(
         const guildId = process.env.DISCORD_GUILD_ID;
         const vipRoleId = process.env.DISCORD_VIP_ROLE_ID;
         const adminRoleId = process.env.DISCORD_ADMIN_ROLE_ID;
+        const supportRoleId = process.env.DISCORD_SUPPORT_ROLE_ID || process.env.SUPPORT_PING_ROLE_ID || "";
+        const mapperRoleId = process.env.DISCORD_MAPPER_ROLE_ID || "";
+        const dashboardRoleId = process.env.DISCORD_DASHBOARD_ROLE_ID || "";
 
         let isVip = false;
         let isAdmin = false;
+        let isSupport = false;
+        let isMapper = false;
+        let canViewDashboard = false;
+        let canEdit = false;
 
         if (guildId && process.env.DISCORD_BOT_TOKEN) {
           const response = await axios.get(
@@ -109,16 +124,38 @@ passport.use(
 
           if (vipRoleId) isVip = roles.includes(vipRoleId);
           if (adminRoleId) isAdmin = roles.includes(adminRoleId);
+          if (supportRoleId) isSupport = roles.includes(supportRoleId);
+          if (mapperRoleId) isMapper = roles.includes(mapperRoleId);
+          if (dashboardRoleId) canViewDashboard = roles.includes(dashboardRoleId);
         }
+
+        canEdit = isAdmin || isMapper;
+        canViewDashboard = isAdmin || isSupport || canViewDashboard;
 
         profile.isVip = isVip;
         profile.isAdmin = isAdmin;
+        profile.isSupport = isSupport;
+        profile.isMapper = isMapper;
+        profile.canEdit = canEdit;
+        profile.canViewDashboard = canViewDashboard;
+        profile.roleNames = [
+          isAdmin ? "Admin" : "",
+          isSupport ? "Support" : "",
+          isMapper ? "Mapper" : "",
+          isVip ? "VIP" : "",
+          canViewDashboard && !isAdmin && !isSupport ? "Dashboard" : ""
+        ].filter(Boolean);
 
         return done(null, profile);
       } catch (error) {
         console.error("Discord Rollenfehler:", error.response?.data || error.message);
         profile.isVip = false;
         profile.isAdmin = false;
+        profile.isSupport = false;
+        profile.isMapper = false;
+        profile.canEdit = false;
+        profile.canViewDashboard = false;
+        profile.roleNames = [];
         return done(null, profile);
       }
     }
@@ -577,6 +614,137 @@ async function seedFromJsonIfDatabaseIsEmpty() {
   }
 }
 
+
+function getSafeBackupFilename(filename) {
+  return path.basename(String(filename || "")).replace(/[^a-zA-Z0-9._-]/g, "");
+}
+
+function listBackups() {
+  if (!fs.existsSync(BACKUP_DIR)) return [];
+  return fs.readdirSync(BACKUP_DIR)
+    .filter((file) => file.endsWith(".json"))
+    .map((file) => {
+      const fullPath = path.join(BACKUP_DIR, file);
+      const stat = fs.statSync(fullPath);
+      return {
+        file,
+        size: stat.size,
+        createdAt: stat.mtime.toISOString()
+      };
+    })
+    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+}
+
+function broadcastLiveEvent(type, payload = {}) {
+  const message = `event: ${type}\ndata: ${JSON.stringify({ type, timestamp: new Date().toISOString(), ...payload })}\n\n`;
+  for (const client of liveClients) {
+    client.write(message);
+  }
+}
+
+async function createBackupFile(reason = "manual", actor = "System", markersInput = null) {
+  const markers = Array.isArray(markersInput) ? markersInput : await loadMarkers();
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const filename = `backup-${timestamp}-${String(reason).replace(/[^a-zA-Z0-9_-]/g, "")}.json`;
+  const backupPayload = {
+    meta: {
+      reason,
+      actor,
+      createdAt: new Date().toISOString(),
+      markerCount: markers.length
+    },
+    markers
+  };
+
+  fs.writeFileSync(path.join(BACKUP_DIR, filename), JSON.stringify(backupPayload, null, 2), "utf8");
+  broadcastLiveEvent("backup-created", { reason, actor, filename, markerCount: markers.length });
+  return { filename, markerCount: markers.length };
+}
+
+function scheduleAutomaticBackups() {
+  const ms = AUTO_BACKUP_INTERVAL_MINUTES * 60 * 1000;
+  setInterval(async () => {
+    try {
+      const markers = await loadMarkers();
+      await createBackupFile("auto", "System", markers);
+      console.log(`Automatisches Backup erstellt (${markers.length} Marker).`);
+    } catch (error) {
+      console.error("Automatisches Backup fehlgeschlagen:", error.message);
+    }
+  }, ms);
+}
+
+async function getDashboardData() {
+  const allMarkers = await loadMarkers();
+  const historyResult = await pool.query(
+    `
+      SELECT history_id, marker_id, action, admin_name, marker_name, change_summary, created_at
+      FROM marker_history
+      ORDER BY created_at DESC, history_id DESC
+      LIMIT 8
+    `
+  );
+
+  const categoryCounts = {};
+  for (const marker of allMarkers) {
+    categoryCounts[marker.category] = (categoryCounts[marker.category] || 0) + 1;
+  }
+
+  const ownerCounts = {};
+  for (const marker of allMarkers) {
+    const owner = String(marker.owner || "Unzugewiesen").trim() || "Unzugewiesen";
+    ownerCounts[owner] = (ownerCounts[owner] || 0) + 1;
+  }
+
+  const topOwners = Object.entries(ownerCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([owner, count]) => ({ owner, count }));
+
+  return {
+    metrics: {
+      totalMarkers: allMarkers.length,
+      favorites: allMarkers.filter((marker) => marker.favorite).length,
+      territories: allMarkers.filter((marker) => marker.category === "Fraktionsgebiet").length,
+      blackmarket: allMarkers.filter((marker) => marker.category === "Schwarzmarkt").length,
+      categories: categoryCounts
+    },
+    topOwners,
+    recentChanges: historyResult.rows.map((row) => ({
+      historyId: Number(row.history_id),
+      markerId: String(row.marker_id),
+      action: String(row.action),
+      adminName: String(row.admin_name || ""),
+      markerName: String(row.marker_name || ""),
+      changeSummary: String(row.change_summary || ""),
+      createdAt: row.created_at ? new Date(row.created_at).toISOString() : null
+    })),
+    backups: listBackups().slice(0, 10)
+  };
+}
+
+function requireEditor(req, res, next) {
+  if (!req.user || !req.user.canEdit) {
+    return res.status(403).json({
+      success: false,
+      error: "Nur Admins oder Mapper dürfen diese Aktion ausführen."
+    });
+  }
+
+  next();
+}
+
+function requireDashboard(req, res, next) {
+  if (!req.user || !req.user.canViewDashboard) {
+    return res.status(403).json({
+      success: false,
+      error: "Kein Zugriff auf das Dashboard."
+    });
+  }
+
+  next();
+}
+
 function requireAdmin(req, res, next) {
   if (!req.user || !req.user.isAdmin) {
     return res.status(403).json({
@@ -613,6 +781,11 @@ app.get("/api/user", (req, res) => {
       username: "",
       isVip: false,
       isAdmin: false,
+      isSupport: false,
+      isMapper: false,
+      canEdit: false,
+      canViewDashboard: false,
+      roleNames: [],
       id: ""
     });
   }
@@ -622,6 +795,11 @@ app.get("/api/user", (req, res) => {
     username: req.user.username,
     isVip: !!req.user.isVip,
     isAdmin: !!req.user.isAdmin,
+    isSupport: !!req.user.isSupport,
+    isMapper: !!req.user.isMapper,
+    canEdit: !!req.user.canEdit,
+    canViewDashboard: !!req.user.canViewDashboard,
+    roleNames: Array.isArray(req.user.roleNames) ? req.user.roleNames : [],
     id: req.user.id || ""
   });
 });
@@ -640,6 +818,71 @@ app.get("/api/health", async (req, res) => {
   }
 });
 
+app.get("/api/stream", (req, res) => {
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders?.();
+
+  res.write(`event: connected\ndata: ${JSON.stringify({ timestamp: new Date().toISOString() })}\n\n`);
+  liveClients.add(res);
+
+  const heartbeat = setInterval(() => {
+    res.write(`event: ping\ndata: ${JSON.stringify({ timestamp: new Date().toISOString() })}\n\n`);
+  }, 25000);
+
+  req.on("close", () => {
+    clearInterval(heartbeat);
+    liveClients.delete(res);
+  });
+});
+
+app.get("/api/admin-dashboard", requireDashboard, async (req, res) => {
+  try {
+    res.json({ success: true, ...(await getDashboardData()) });
+  } catch (error) {
+    console.error("Dashboard Fehler:", error.message);
+    res.status(500).json({ success: false, error: "Dashboard konnte nicht geladen werden." });
+  }
+});
+
+app.get("/api/backups", requireDashboard, async (req, res) => {
+  try {
+    res.json({ success: true, backups: listBackups() });
+  } catch (error) {
+    console.error("Backup-Liste Fehler:", error.message);
+    res.status(500).json({ success: false, error: "Backups konnten nicht geladen werden." });
+  }
+});
+
+app.get("/api/backups/:filename", requireAdmin, async (req, res) => {
+  try {
+    const file = getSafeBackupFilename(req.params.filename);
+    if (!file) {
+      return res.status(400).json({ success: false, error: "Dateiname fehlt." });
+    }
+    const fullPath = path.join(BACKUP_DIR, file);
+    if (!fs.existsSync(fullPath)) {
+      return res.status(404).json({ success: false, error: "Backup nicht gefunden." });
+    }
+    res.download(fullPath);
+  } catch (error) {
+    console.error("Backup-Download Fehler:", error.message);
+    res.status(500).json({ success: false, error: "Backup konnte nicht geladen werden." });
+  }
+});
+
+app.post("/api/backups/create", requireAdmin, async (req, res) => {
+  try {
+    const markers = await loadMarkers();
+    const backup = await createBackupFile("manual", req.user?.username || "Admin", markers);
+    res.json({ success: true, backup });
+  } catch (error) {
+    console.error("Manuelles Backup fehlgeschlagen:", error.message);
+    res.status(500).json({ success: false, error: "Backup konnte nicht erstellt werden." });
+  }
+});
+
 app.get("/markers", async (req, res) => {
   try {
     const markers = await loadMarkers();
@@ -650,7 +893,7 @@ app.get("/markers", async (req, res) => {
   }
 });
 
-app.post("/markers", requireAdmin, async (req, res) => {
+app.post("/markers", requireEditor, async (req, res) => {
   const incoming = Array.isArray(req.body.markers) ? req.body.markers : [];
   const normalizedIncoming = incoming.map(normalizeMarker).filter(Boolean);
   const adminName = req.user?.username || "Unbekannt";
@@ -660,6 +903,7 @@ app.post("/markers", requireAdmin, async (req, res) => {
   try {
     const oldMarkers = await loadMarkers(client);
     const oldMap = new Map(oldMarkers.map((marker) => [marker.id, marker]));
+    const shouldBackup = oldMarkers.length > 0;
 
     const finalMarkers = normalizedIncoming.map((marker) => {
       const oldMarker = oldMap.get(marker.id);
@@ -703,6 +947,10 @@ app.post("/markers", requireAdmin, async (req, res) => {
         return { marker, oldMarker, changes };
       })
       .filter(Boolean);
+
+    if (shouldBackup) {
+      await createBackupFile("before-save", adminName, oldMarkers);
+    }
 
     await client.query("BEGIN");
     await client.query("DELETE FROM markers");
@@ -766,6 +1014,14 @@ app.post("/markers", requireAdmin, async (req, res) => {
     for (const marker of removed) {
       await sendDiscordLog(buildDiscordLog("deleted", marker, adminName, []));
     }
+
+    broadcastLiveEvent("markers-updated", {
+      actor: adminName,
+      markerCount: finalMarkers.length,
+      added: added.length,
+      changed: changed.length,
+      removed: removed.length
+    });
 
     res.json({
       success: true,
@@ -846,6 +1102,11 @@ app.post("/api/import-markers", requireAdmin, async (req, res) => {
   const client = await pool.connect();
 
   try {
+    const oldMarkers = await loadMarkers(client);
+    if (oldMarkers.length > 0) {
+      await createBackupFile("before-import", adminName, oldMarkers);
+    }
+
     await client.query("BEGIN");
     await client.query("DELETE FROM markers");
 
@@ -866,6 +1127,12 @@ app.post("/api/import-markers", requireAdmin, async (req, res) => {
     await client.query("COMMIT");
 
     await sendDiscordLog(`📥 **${adminName}** hat einen Marker-Import ausgeführt. Importierte Marker: **${cleanMarkers.length}**`);
+
+    broadcastLiveEvent("markers-updated", {
+      actor: adminName,
+      markerCount: cleanMarkers.length,
+      imported: cleanMarkers.length
+    });
 
     res.json({
       success: true,
@@ -961,6 +1228,11 @@ app.post("/api/marker-history-entry/:historyId/restore", requireAdmin, async (re
       return res.status(400).json({ success: false, error: "Snapshot konnte nicht gelesen werden." });
     }
 
+    const currentMarkersBeforeRestore = await loadMarkers(client);
+    if (currentMarkersBeforeRestore.length > 0) {
+      await createBackupFile("before-restore", adminName, currentMarkersBeforeRestore);
+    }
+
     const currentResult = await client.query(
       `
         SELECT id, name, description, category, lat, lng, radius, image, owner, favorite, created_by, updated_by, created_at, updated_at
@@ -1001,6 +1273,12 @@ app.post("/api/marker-history-entry/:historyId/restore", requireAdmin, async (re
 
     await sendDiscordLog(buildDiscordLog("restored", restoredMarker, adminName, changes));
 
+    broadcastLiveEvent("markers-updated", {
+      actor: adminName,
+      markerCount: (await loadMarkers()).length,
+      restoredMarkerId: restoredMarker.id
+    });
+
     res.json({
       success: true,
       marker: restoredMarker,
@@ -1019,7 +1297,7 @@ app.post("/api/marker-history-entry/:historyId/restore", requireAdmin, async (re
   }
 });
 
-app.post("/upload", requireAdmin, (req, res) => {
+app.post("/upload", requireEditor, (req, res) => {
   upload.single("file")(req, res, (error) => {
     if (error) {
       return res.status(400).json({
@@ -1049,9 +1327,11 @@ async function startServer() {
   try {
     await createTables();
     await seedFromJsonIfDatabaseIsEmpty();
+    scheduleAutomaticBackups();
 
     app.listen(PORT, () => {
       console.log(`Server läuft auf Port ${PORT}`);
+      console.log(`Auto-Backups alle ${AUTO_BACKUP_INTERVAL_MINUTES} Minuten aktiv.`);
     });
   } catch (error) {
     console.error("Serverstart fehlgeschlagen:", error.message);
