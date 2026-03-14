@@ -33,7 +33,10 @@ const icons = {
   UG: createEmojiIcon("🔫"),
   Feld: createEmojiIcon("🌿"),
   Workstation: createEmojiIcon("🖥️"),
-  Schwarzmarkt: createEmojiIcon("🕶")
+  Schwarzmarkt: createEmojiIcon("🕶"),
+  "Fraktions Krankenhaus": createEmojiIcon("🏥"),
+  Systempunkteshop: createEmojiIcon("🛒"),
+  Fraktion: createEmojiIcon("🛡️")
 };
 
 function createEmojiIcon(emoji) {
@@ -443,6 +446,9 @@ function updateStats() {
   const statUG = document.getElementById("statUG");
   const statField = document.getElementById("statField");
   const statWorkstation = document.getElementById("statWorkstation");
+  const statHospital = document.getElementById("statHospital");
+  const statPointShop = document.getElementById("statPointShop");
+  const statFaction = document.getElementById("statFaction");
   const statVip = document.getElementById("statVip");
   const statFavorites = document.getElementById("statFavorites");
 
@@ -451,6 +457,9 @@ function updateStats() {
   if (statUG) statUG.textContent = `UG: ${markers.filter((m) => m.category === "UG").length}`;
   if (statField) statField.textContent = `Felder: ${markers.filter((m) => m.category === "Feld").length}`;
   if (statWorkstation) statWorkstation.textContent = `Workstations: ${markers.filter((m) => m.category === "Workstation").length}`;
+  if (statHospital) statHospital.textContent = `Fraktions Krankenhaus: ${markers.filter((m) => m.category === "Fraktions Krankenhaus").length}`;
+  if (statPointShop) statPointShop.textContent = `Systempunkteshop: ${markers.filter((m) => m.category === "Systempunkteshop").length}`;
+  if (statFaction) statFaction.textContent = `Fraktion: ${markers.filter((m) => m.category === "Fraktion").length}`;
   if (statVip) statVip.textContent = `Schwarzmarkt: ${vipVisible.length}`;
   if (statFavorites) statFavorites.textContent = `Favoriten: ${favoriteCount}`;
 }
