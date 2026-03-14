@@ -26,6 +26,7 @@ const {
   WELCOME_CHANNEL_ID,
   ADMIN_ROLE_ID,
   SUPPORT_CATEGORY_ID,
+  TICKET_LOG_CHANNEL_ID,
 } = process.env;
 
 function verifyRow() {
@@ -61,6 +62,34 @@ function messageHasButton(message, buttonCustomId) {
   );
 }
 
+function parseTicketTopic(topic) {
+  if (!topic || !String(topic).startsWith('ticket:')) {
+    return { ownerId: '', createdAt: null };
+  }
+
+  const parts = String(topic).split(':');
+  return {
+    ownerId: parts[1] || '',
+    createdAt: parts[2] ? Number(parts[2]) : null,
+  };
+}
+
+function formatDuration(ms) {
+  if (!ms || ms < 1000) return 'unter 1 Minute';
+  const totalMinutes = Math.floor(ms / 60000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (!hours) return `${minutes} Minute(n)`;
+  return `${hours} Std. ${minutes} Min.`;
+}
+
+async function logTicketEvent(content) {
+  if (!TICKET_LOG_CHANNEL_ID) return;
+  const channel = await client.channels.fetch(TICKET_LOG_CHANNEL_ID).catch(() => null);
+  if (!channel || !channel.isTextBased()) return;
+  await channel.send({ content }).catch(console.error);
+}
+
 async function ensureSetupMessage(channelId, buttonCustomId, content, row) {
   if (!channelId) return;
 
@@ -79,13 +108,9 @@ async function ensureSetupMessage(channelId, buttonCustomId, content, row) {
   };
 
   if (existing) {
-    const sameContent = existing.content === content;
-    const sameButton = messageHasButton(existing, buttonCustomId);
-
-    if (!sameContent || !sameButton) {
+    if (existing.content !== content) {
       await existing.edit(payload).catch(console.error);
     }
-
     return;
   }
 
@@ -150,7 +175,6 @@ client.on('interactionCreate', async (interaction) => {
 
     try {
       await interaction.member.roles.add(role);
-
       return interaction.reply({
         content: '✅ Du wurdest erfolgreich verifiziert.',
         ephemeral: true,
@@ -168,7 +192,7 @@ client.on('interactionCreate', async (interaction) => {
     const existing = interaction.guild.channels.cache.find(
       (channel) =>
         channel.type === ChannelType.GuildText &&
-        channel.topic === `ticket:${interaction.user.id}`
+        String(channel.topic || '').startsWith(`ticket:${interaction.user.id}`)
     );
 
     if (existing) {
@@ -184,6 +208,7 @@ client.on('interactionCreate', async (interaction) => {
         .replace(/[^a-z0-9-]/g, '')
         .slice(0, 20) || 'user';
 
+    const createdAt = Date.now();
     const overwrites = [
       {
         id: interaction.guild.roles.everyone.id,
@@ -225,7 +250,7 @@ client.on('interactionCreate', async (interaction) => {
       const ticketChannel = await interaction.guild.channels.create({
         name: `ticket-${safeName}`,
         type: ChannelType.GuildText,
-        topic: `ticket:${interaction.user.id}`,
+        topic: `ticket:${interaction.user.id}:${createdAt}`,
         parent: SUPPORT_CATEGORY_ID || undefined,
         permissionOverwrites: overwrites,
       });
@@ -234,6 +259,10 @@ client.on('interactionCreate', async (interaction) => {
         content: `🎫 Hallo ${interaction.user}, ein Admin meldet sich hier.\nDrücke unten auf **Ticket schließen**, wenn alles erledigt ist.`,
         components: [closeTicketRow()],
       });
+
+      await logTicketEvent(
+        `🟢 Ticket erstellt\n**User:** ${interaction.user.tag}\n**Channel:** ${ticketChannel}\n**Zeit:** <t:${Math.floor(createdAt / 1000)}:F>`
+      );
 
       return interaction.reply({
         content: `✅ Ticket erstellt: ${ticketChannel}`,
@@ -249,12 +278,12 @@ client.on('interactionCreate', async (interaction) => {
   }
 
   if (interaction.customId === 'ticket_close_btn') {
-    const ticketOwnerId = interaction.channel.topic?.replace('ticket:', '');
+    const ticketInfo = parseTicketTopic(interaction.channel.topic);
     const isAdmin = ADMIN_ROLE_ID
       ? interaction.member.roles.cache.has(ADMIN_ROLE_ID)
       : false;
 
-    if (interaction.user.id !== ticketOwnerId && !isAdmin) {
+    if (interaction.user.id !== ticketInfo.ownerId && !isAdmin) {
       return interaction.reply({
         content: '❌ Du darfst dieses Ticket nicht schließen.',
         ephemeral: true,
@@ -265,6 +294,14 @@ client.on('interactionCreate', async (interaction) => {
       content: '🗑️ Ticket wird geschlossen...',
       ephemeral: true,
     });
+
+    const openedAt = ticketInfo.createdAt ? new Date(ticketInfo.createdAt) : null;
+    const duration = openedAt ? formatDuration(Date.now() - openedAt.getTime()) : 'unbekannt';
+    const ownerMention = ticketInfo.ownerId ? `<@${ticketInfo.ownerId}>` : 'Unbekannt';
+
+    await logTicketEvent(
+      `🔴 Ticket geschlossen\n**User:** ${ownerMention}\n**Channel:** #${interaction.channel.name}\n**Geschlossen von:** ${interaction.user.tag}\n**Dauer:** ${duration}`
+    );
 
     setTimeout(async () => {
       await interaction.channel.delete().catch(console.error);
