@@ -586,26 +586,55 @@ function renderSearchResults() {
     return;
   }
 
-  const results = searchValue ? visible.slice(0, 10) : visible.slice(0, 8);
+  const categoryOrder = Object.keys(CATEGORY_META);
+  const grouped = new Map();
 
-  list.innerHTML = results.map((marker) => {
-    const owner = isAdmin() ? `<div class="search-result-meta">Besitzer: ${escapeHtml(marker.owner || "-")}</div>` : "";
-    const territory = marker.category === "Fraktionsgebiet"
-      ? `<div class="search-result-meta">Radius: ${escapeHtml(formatValue(marker.radius || 200))} m</div>`
-      : "";
+  visible.forEach((marker) => {
+    const category = marker.category || "Sonstige";
+    if (!grouped.has(category)) grouped.set(category, []);
+    grouped.get(category).push(marker);
+  });
+
+  const sortedCategories = categoryOrder
+    .filter((category) => grouped.has(category))
+    .concat([...grouped.keys()].filter((category) => !categoryOrder.includes(category)).sort((a, b) => a.localeCompare(b, "de")));
+
+  list.innerHTML = sortedCategories.map((category, index) => {
+    const items = grouped.get(category) || [];
+    const meta = CATEGORY_META[category] || { icon: "📍", label: category };
+    const isOpen = searchValue ? "open" : index === 0 ? "open" : "";
+
+    const cards = items.map((marker) => {
+      const owner = isAdmin() ? `<div class="search-result-meta">Besitzer: ${escapeHtml(marker.owner || "-")}</div>` : "";
+      const territory = marker.category === "Fraktionsgebiet"
+        ? `<div class="search-result-meta">Radius: ${escapeHtml(formatValue(marker.radius || 200))} m</div>`
+        : "";
+
+      return `
+        <div class="search-result">
+          <div class="search-result-title">${marker.favorite ? "⭐ " : ""}${escapeHtml(marker.name)}</div>
+          <div class="search-result-meta">${escapeHtml(category)} • ${Number(marker.lat).toFixed(2)}, ${Number(marker.lng).toFixed(2)}</div>
+          ${owner}
+          ${territory}
+          <div class="search-result-actions">
+            <button onclick="window.focusMarker('${marker.id}')">Auf Karte</button>
+            ${isAdmin() ? `<button class="secondary" onclick="window.editMarker('${marker.id}')">Bearbeiten</button>` : ""}
+            ${isAdmin() ? `<button class="secondary" onclick="window.showMarkerHistory('${marker.id}')">Verlauf</button>` : ""}
+          </div>
+        </div>
+      `;
+    }).join("");
 
     return `
-      <div class="search-result">
-        <div class="search-result-title">${marker.favorite ? "⭐ " : ""}${escapeHtml(marker.name)}</div>
-        <div class="search-result-meta">${escapeHtml(marker.category)} • ${Number(marker.lat).toFixed(2)}, ${Number(marker.lng).toFixed(2)}</div>
-        ${owner}
-        ${territory}
-        <div class="search-result-actions">
-          <button onclick="window.focusMarker('${marker.id}')">Auf Karte</button>
-          ${isAdmin() ? `<button class="secondary" onclick="window.editMarker('${marker.id}')">Bearbeiten</button>` : ""}
-          ${isAdmin() ? `<button class="secondary" onclick="window.showMarkerHistory('${marker.id}')">Verlauf</button>` : ""}
+      <details class="search-group" ${isOpen}>
+        <summary class="search-group-summary">
+          <span class="search-group-left">${escapeHtml(meta.icon || "📍")} ${escapeHtml(meta.label || category)}</span>
+          <span class="search-group-right">${items.length}</span>
+        </summary>
+        <div class="search-group-items">
+          ${cards}
         </div>
-      </div>
+      </details>
     `;
   }).join("");
 }
