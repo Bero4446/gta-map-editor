@@ -18,7 +18,17 @@ const PUBLIC_DIR = path.join(__dirname, "public");
 const MARKERS_FILE = path.join(__dirname, "markers.json");
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL || "";
 const DATABASE_URL = process.env.DATABASE_URL;
-const ALLOWED_CATEGORIES = ["Dealer", "UG", "Feld", "Workstation", "Schwarzmarkt", "Fraktions Krankenhaus", "Systempunkteshop", "Fraktion"];
+const ALLOWED_CATEGORIES = [
+  "Dealer",
+  "UG",
+  "Feld",
+  "Workstation",
+  "Schwarzmarkt",
+  "Fraktions Krankenhaus",
+  "Systempunkteshop",
+  "Fraktion",
+  "Fraktionsgebiet"
+];
 
 if (!fs.existsSync(PUBLIC_DIR)) {
   fs.mkdirSync(PUBLIC_DIR, { recursive: true });
@@ -157,6 +167,10 @@ function normalizeMarker(marker) {
 
   const category = String(marker.category || "Dealer");
   const safeCategory = ALLOWED_CATEGORIES.includes(category) ? category : "Dealer";
+  const rawRadius = Number(marker.radius || marker.zoneRadius || 0);
+  const radius = safeCategory === "Fraktionsgebiet"
+    ? (Number.isFinite(rawRadius) && rawRadius > 0 ? Math.max(50, Math.round(rawRadius)) : 200)
+    : 0;
 
   return {
     id: String(marker.id || crypto.randomUUID()),
@@ -165,6 +179,7 @@ function normalizeMarker(marker) {
     category: safeCategory,
     lat,
     lng,
+    radius,
     image: typeof marker.image === "string" ? marker.image : "",
     owner: String(marker.owner || marker.assignee || "").trim(),
     favorite: !!marker.favorite,
@@ -183,6 +198,7 @@ function rowToMarker(row) {
     category: String(row.category || "Dealer"),
     lat: Number(row.lat),
     lng: Number(row.lng),
+    radius: Number(row.radius || 0),
     image: typeof row.image === "string" ? row.image : "",
     owner: String(row.owner || ""),
     favorite: !!row.favorite,
@@ -199,7 +215,8 @@ function filterMarkersForUser(markers, user) {
 }
 
 function markerSummary(marker) {
-  return `${marker.name} [${marker.category}] @ ${Number(marker.lat).toFixed(2)}, ${Number(marker.lng).toFixed(2)}`;
+  const territory = marker.category === "Fraktionsgebiet" ? ` | Radius ${Number(marker.radius || 200)}m` : "";
+  return `${marker.name} [${marker.category}] @ ${Number(marker.lat).toFixed(2)}, ${Number(marker.lng).toFixed(2)}${territory}`;
 }
 
 function formatValue(value) {
@@ -216,9 +233,10 @@ function buildMarkerChanges(oldMarker, newMarker) {
     { key: "name", label: "Name" },
     { key: "description", label: "Beschreibung" },
     { key: "category", label: "Kategorie" },
-    { key: "owner", label: "Besitzer" },
+    { key: "owner", label: "Besitzer/Zuständigkeit" },
     { key: "favorite", label: "Favorit" },
-    { key: "image", label: "Screenshot" }
+    { key: "image", label: "Screenshot" },
+    { key: "radius", label: "Gebietsradius" }
   ];
 
   for (const field of fields) {
@@ -271,6 +289,10 @@ function buildHistorySummary(action, marker, changes) {
     return `Marker per Import übernommen: ${markerSummary(marker)}`;
   }
 
+  if (action === "restored") {
+    return `Marker wiederhergestellt: ${markerSummary(marker)}`;
+  }
+
   if (!changes.length) {
     return `Marker aktualisiert: ${markerSummary(marker)}`;
   }
@@ -279,23 +301,38 @@ function buildHistorySummary(action, marker, changes) {
 }
 
 function buildDiscordLog(action, marker, adminName, changes) {
+  const base = [
+    `**Marker:** ${marker.name}`,
+    `**Kategorie:** ${marker.category}`,
+    `**Besitzer:** ${marker.owner || "-"}`,
+    `**Koordinaten:** ${Number(marker.lat).toFixed(2)}, ${Number(marker.lng).toFixed(2)}`
+  ];
+
+  if (marker.category === "Fraktionsgebiet") {
+    base.push(`**Radius:** ${Number(marker.radius || 200)}m`);
+  }
+
   if (action === "created") {
-    return `🟢 **${adminName}** hat Marker erstellt: **${marker.name}** | Kategorie: **${marker.category}** | Besitzer: **${marker.owner || "-"}** | Favorit: **${marker.favorite ? "Ja" : "Nein"}** | Koords: **${Number(marker.lat).toFixed(2)}, ${Number(marker.lng).toFixed(2)}**`;
+    return `🟢 **${adminName}** hat Marker erstellt\n${base.join("\n")}`;
   }
 
   if (action === "deleted") {
-    return `🔴 **${adminName}** hat Marker gelöscht: **${marker.name}** | Kategorie: **${marker.category}** | Besitzer: **${marker.owner || "-"}** | Koords: **${Number(marker.lat).toFixed(2)}, ${Number(marker.lng).toFixed(2)}**`;
+    return `🔴 **${adminName}** hat Marker gelöscht\n${base.join("\n")}`;
   }
 
   if (action === "imported") {
-    return `📥 **${adminName}** hat Marker importiert: **${marker.name}** | Kategorie: **${marker.category}** | Besitzer: **${marker.owner || "-"}**`;
+    return `📥 **${adminName}** hat Marker importiert\n${base.join("\n")}`;
+  }
+
+  if (action === "restored") {
+    return `♻️ **${adminName}** hat eine Marker-Version wiederhergestellt\n${base.join("\n")}`;
   }
 
   const summary = changes.length
     ? changes.map((change) => `${change.label}: ${formatValue(change.before)} → ${formatValue(change.after)}`).join(" | ")
     : "Keine Detailänderungen erkannt";
 
-  return `🟡 **${adminName}** hat Marker geändert: **${marker.name}** | ${summary}`;
+  return `🟡 **${adminName}** hat Marker geändert\n${base.join("\n")}\n**Änderungen:** ${summary}`;
 }
 
 async function sendDiscordLog(content) {
@@ -337,6 +374,7 @@ async function createTables() {
       category TEXT NOT NULL,
       lat DOUBLE PRECISION NOT NULL,
       lng DOUBLE PRECISION NOT NULL,
+      radius INTEGER NOT NULL DEFAULT 0,
       image TEXT NOT NULL DEFAULT '',
       owner TEXT NOT NULL DEFAULT '',
       favorite BOOLEAN NOT NULL DEFAULT FALSE,
@@ -347,6 +385,7 @@ async function createTables() {
     )
   `);
 
+  await pool.query(`ALTER TABLE markers ADD COLUMN IF NOT EXISTS radius INTEGER NOT NULL DEFAULT 0`);
   await pool.query(`ALTER TABLE markers ADD COLUMN IF NOT EXISTS owner TEXT NOT NULL DEFAULT ''`);
   await pool.query(`ALTER TABLE markers ADD COLUMN IF NOT EXISTS favorite BOOLEAN NOT NULL DEFAULT FALSE`);
   await pool.query(`ALTER TABLE markers ADD COLUMN IF NOT EXISTS created_by TEXT NOT NULL DEFAULT ''`);
@@ -356,6 +395,7 @@ async function createTables() {
 
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_markers_category ON markers(category)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_markers_favorite ON markers(favorite)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_markers_owner ON markers(owner)`);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS marker_history (
@@ -383,7 +423,7 @@ async function getMarkerCount() {
 
 async function loadMarkers(client = pool) {
   const result = await client.query(`
-    SELECT id, name, description, category, lat, lng, image, owner, favorite, created_by, updated_by, created_at, updated_at
+    SELECT id, name, description, category, lat, lng, radius, image, owner, favorite, created_by, updated_by, created_at, updated_at
     FROM markers
     ORDER BY favorite DESC, updated_at DESC, id ASC
   `);
@@ -395,10 +435,10 @@ async function insertMarker(client, marker) {
   await client.query(
     `
       INSERT INTO markers (
-        id, name, description, category, lat, lng, image, owner, favorite,
+        id, name, description, category, lat, lng, radius, image, owner, favorite,
         created_by, updated_by, created_at, updated_at
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE($12::timestamptz, NOW()), COALESCE($13::timestamptz, NOW()))
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, COALESCE($13::timestamptz, NOW()), COALESCE($14::timestamptz, NOW()))
     `,
     [
       marker.id,
@@ -407,6 +447,49 @@ async function insertMarker(client, marker) {
       marker.category,
       marker.lat,
       marker.lng,
+      marker.radius || 0,
+      marker.image || "",
+      marker.owner || "",
+      !!marker.favorite,
+      marker.createdBy || "",
+      marker.updatedBy || "",
+      marker.createdAt || null,
+      marker.updatedAt || null
+    ]
+  );
+}
+
+async function upsertMarker(client, marker) {
+  await client.query(
+    `
+      INSERT INTO markers (
+        id, name, description, category, lat, lng, radius, image, owner, favorite,
+        created_by, updated_by, created_at, updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, COALESCE($13::timestamptz, NOW()), COALESCE($14::timestamptz, NOW()))
+      ON CONFLICT (id) DO UPDATE SET
+        name = EXCLUDED.name,
+        description = EXCLUDED.description,
+        category = EXCLUDED.category,
+        lat = EXCLUDED.lat,
+        lng = EXCLUDED.lng,
+        radius = EXCLUDED.radius,
+        image = EXCLUDED.image,
+        owner = EXCLUDED.owner,
+        favorite = EXCLUDED.favorite,
+        created_by = EXCLUDED.created_by,
+        updated_by = EXCLUDED.updated_by,
+        created_at = EXCLUDED.created_at,
+        updated_at = EXCLUDED.updated_at
+    `,
+    [
+      marker.id,
+      marker.name,
+      marker.description,
+      marker.category,
+      marker.lat,
+      marker.lng,
+      marker.radius || 0,
       marker.image || "",
       marker.owner || "",
       !!marker.favorite,
@@ -435,7 +518,7 @@ async function insertHistory(client, { markerId, action, adminName, adminId, mar
       markerName || "",
       changeSummary || "",
       JSON.stringify(changes || []),
-      JSON.stringify(snapshot || {})
+      JSON.stringify(snapshot || {}),
     ]
   );
 }
@@ -463,6 +546,7 @@ async function seedFromJsonIfDatabaseIsEmpty() {
       const preparedMarker = {
         ...marker,
         owner: marker.owner || "",
+        radius: marker.radius || 0,
         favorite: !!marker.favorite,
         createdBy: marker.createdBy || "Import",
         updatedBy: marker.updatedBy || "Import",
@@ -586,6 +670,7 @@ app.post("/markers", requireAdmin, async (req, res) => {
           ...oldMarker,
           ...marker,
           owner: marker.owner || oldMarker.owner || "",
+          radius: marker.radius || 0,
           favorite: !!marker.favorite,
           createdBy: oldMarker.createdBy || adminName,
           updatedBy: adminName,
@@ -597,6 +682,7 @@ app.post("/markers", requireAdmin, async (req, res) => {
       return {
         ...marker,
         owner: marker.owner || adminName,
+        radius: marker.radius || 0,
         favorite: !!marker.favorite,
         createdBy: adminName,
         updatedBy: adminName,
@@ -742,6 +828,7 @@ app.post("/api/import-markers", requireAdmin, async (req, res) => {
     .map((marker) => ({
       ...marker,
       owner: marker.owner || adminName,
+      radius: marker.radius || 0,
       favorite: !!marker.favorite,
       createdBy: marker.createdBy || adminName,
       updatedBy: adminName,
@@ -839,6 +926,96 @@ app.get("/api/marker-history/:markerId", requireAdmin, async (req, res) => {
   } catch (error) {
     console.error("Fehler beim Laden der Marker-Historie:", error.message);
     res.status(500).json({ success: false, error: "Historie konnte nicht geladen werden." });
+  }
+});
+
+app.post("/api/marker-history-entry/:historyId/restore", requireAdmin, async (req, res) => {
+  const historyId = Number(req.params.historyId);
+  if (!Number.isFinite(historyId)) {
+    return res.status(400).json({ success: false, error: "Ungültige Historien-ID." });
+  }
+
+  const adminName = req.user?.username || "Unbekannt";
+  const adminId = req.user?.id || "";
+  const client = await pool.connect();
+
+  try {
+    const entryResult = await client.query(
+      `
+        SELECT history_id, marker_id, marker_name, snapshot_json
+        FROM marker_history
+        WHERE history_id = $1
+        LIMIT 1
+      `,
+      [historyId]
+    );
+
+    if (!entryResult.rowCount) {
+      return res.status(404).json({ success: false, error: "Historieneintrag nicht gefunden." });
+    }
+
+    const entry = entryResult.rows[0];
+    const snapshot = normalizeMarker(JSON.parse(entry.snapshot_json || "{}"));
+
+    if (!snapshot) {
+      return res.status(400).json({ success: false, error: "Snapshot konnte nicht gelesen werden." });
+    }
+
+    const currentResult = await client.query(
+      `
+        SELECT id, name, description, category, lat, lng, radius, image, owner, favorite, created_by, updated_by, created_at, updated_at
+        FROM markers
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [snapshot.id]
+    );
+
+    const oldMarker = currentResult.rowCount ? rowToMarker(currentResult.rows[0]) : null;
+    const nowIso = new Date().toISOString();
+    const restoredMarker = {
+      ...snapshot,
+      owner: snapshot.owner || oldMarker?.owner || adminName,
+      radius: snapshot.radius || 0,
+      createdBy: snapshot.createdBy || oldMarker?.createdBy || adminName,
+      updatedBy: adminName,
+      createdAt: snapshot.createdAt || oldMarker?.createdAt || nowIso,
+      updatedAt: nowIso
+    };
+
+    const changes = buildMarkerChanges(oldMarker, restoredMarker);
+
+    await client.query("BEGIN");
+    await upsertMarker(client, restoredMarker);
+    await insertHistory(client, {
+      markerId: restoredMarker.id,
+      action: "restored",
+      adminName,
+      adminId,
+      markerName: restoredMarker.name,
+      changeSummary: buildHistorySummary("restored", restoredMarker, changes),
+      changes,
+      snapshot: restoredMarker
+    });
+    await client.query("COMMIT");
+
+    await sendDiscordLog(buildDiscordLog("restored", restoredMarker, adminName, changes));
+
+    res.json({
+      success: true,
+      marker: restoredMarker,
+      message: `${entry.marker_name || restoredMarker.name} wurde wiederhergestellt.`
+    });
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch (rollbackError) {
+      console.error("Rollback Fehler:", rollbackError.message);
+    }
+    console.error("Fehler beim Wiederherstellen:", error.message);
+    res.status(500).json({ success: false, error: "Version konnte nicht wiederhergestellt werden." });
+  } finally {
+    client.release();
   }
 });
 
