@@ -337,8 +337,7 @@ function buildHistorySummary(action, marker, changes) {
   return `Marker geändert: ${changes.map((change) => `${change.label}: ${formatValue(change.before)} → ${formatValue(change.after)}`).join(" | ")}`;
 }
 
-function buildDiscordLog(action, marker, adminName, changes) {
-  const base = [
+function buildDiscordLog(action, marker, adminName, changes) {  const base = [
     `**Marker:** ${marker.name}`,
     `**Kategorie:** ${marker.category}`,
     `**Besitzer:** ${marker.owner || "-"}`,
@@ -677,8 +676,7 @@ function scheduleAutomaticBackups() {
 async function getDashboardData() {
   const allMarkers = await loadMarkers();
   const historyResult = await pool.query(
-    `
-      SELECT history_id, marker_id, action, admin_name, marker_name, change_summary, created_at
+    `      SELECT history_id, marker_id, action, admin_name, marker_name, change_summary, created_at
       FROM marker_history
       ORDER BY created_at DESC, history_id DESC
       LIMIT 8
@@ -758,13 +756,32 @@ function requireAdmin(req, res, next) {
 
 app.get("/auth/discord", passport.authenticate("discord"));
 
-app.get(
-  "/auth/discord/callback",
-  passport.authenticate("discord", { failureRedirect: "/" }),
-  (req, res) => {
-    res.redirect("/");
-  }
-);
+app.get("/auth/discord/callback", (req, res, next) => {
+  passport.authenticate("discord", (err, user, info) => {
+    console.log("DISCORD CALLBACK QUERY:", req.query);
+    console.log("DISCORD CALLBACK ERR:", err);
+    console.log("DISCORD CALLBACK INFO:", info);
+
+    if (err) {
+      console.error("OAuth Fehler:", err);
+      return res.status(500).send(`Discord OAuth Fehler: ${err.message || err}`);
+    }
+
+    if (!user) {
+      console.error("Kein User von Discord zurückbekommen:", info);
+      return res.status(401).send("Discord Login fehlgeschlagen.");
+    }
+
+    req.logIn(user, (loginErr) => {
+      if (loginErr) {
+        console.error("Session Login Fehler:", loginErr);
+        return res.status(500).send(`Session Fehler: ${loginErr.message || loginErr}`);
+      }
+
+      return res.redirect("/");
+    });
+  })(req, res, next);
+});
 
 app.get("/logout", (req, res) => {
   req.logout(() => {
@@ -998,8 +1015,7 @@ app.post("/markers", requireEditor, async (req, res) => {
         changeSummary: summary,
         changes: [],
         snapshot: marker
-      });
-    }
+      });    }
 
     await client.query("COMMIT");
 
