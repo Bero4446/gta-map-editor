@@ -557,9 +557,7 @@ function renderMarkers() {
   markerLayerById = new Map();
 
   getSortedMarkers().forEach((marker) => {
-    if (!shouldShowMarker(marker)) return;
-
-    const group = L.layerGroup();
+    if (!shouldShowMarker(marker)) return;    const group = L.layerGroup();
     let territoryLayer = null;
 
     if (marker.category === "Fraktionsgebiet") {
@@ -804,8 +802,8 @@ function downloadJson(filename, data) {
 }
 
 async function handleSaveMarker() {
-  if (!isAdmin()) {
-    showMessage("Nur Admins dürfen Marker erstellen oder bearbeiten.", "error");
+  if (!canEditMarkers()) {
+    showMessage("Nur Admins oder Mapper dürfen Marker erstellen oder bearbeiten.", "error");
     return;
   }
 
@@ -924,7 +922,6 @@ window.toggleMarkerFavorite = async function (id) {
   }
 };
 
-
 window.duplicateMarker = async function (id) {
   if (!canEditMarkers()) return;
 
@@ -977,8 +974,7 @@ window.deleteMarker = async function (id) {
 };
 
 function renderHistory(history) {
-  const title = document.getElementById("historyTitle");
-  const list = document.getElementById("historyList");
+  const title = document.getElementById("historyTitle");  const list = document.getElementById("historyList");
 
   if (!title || !list) return;
 
@@ -1126,7 +1122,6 @@ async function importMarkersFromFile() {
     showMessage(error.message || "Import fehlgeschlagen.", "error");
   }
 }
-
 
 function setSyncStatus(state = "offline", label = "Offline") {
   const el = document.getElementById("syncStatus");
@@ -1299,10 +1294,7 @@ function startLiveSync() {
   liveSyncSource.onerror = () => {
     setSyncStatus("offline", "Neu verbinden…");
   };
-}
-
-
-map.on("click", (e) => {
+}map.on("click", (e) => {
   const latInput = document.getElementById("markerLat");
   const lngInput = document.getElementById("markerLng");
 
