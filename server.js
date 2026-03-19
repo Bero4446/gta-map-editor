@@ -1,4 +1,6 @@
-const { sendDevlogPost, sendMapUpdatesPost, sendProjectUpdate } = require('./bot');
+require("dotenv").config();
+
+const { sendDevlogPost, sendMapUpdatesPost, sendProjectUpdate } = require("./bot");
 const express = require("express");
 const fs = require("fs");
 const path = require("path");
