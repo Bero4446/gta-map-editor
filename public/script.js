@@ -75,38 +75,6 @@ async function loadMapImage() {
 }
 
 loadMapImage();
-  Dealer: { icon: "💊", statId: "statDealer", label: "Dealer" },
-  UG: { icon: "🔫", statId: "statUG", label: "UG" },
-  Feld: { icon: "🌿", statId: "statField", label: "Felder" },
-  Workstation: { icon: "🖥️", statId: "statWorkstation", label: "Workstations" },
-  Schwarzmarkt: { icon: "🕶", statId: "statVip", label: "Schwarzmarkt", vipOnly: true },
-  "Fraktions Krankenhaus": { icon: "🏥", statId: "statHospital", label: "Fraktions Krankenhaus" },
-  Systempunkteshop: { icon: "🛒", statId: "statPointShop", label: "Systempunkteshop" },
-  Fraktion: { icon: "🛡️", statId: "statFaction", label: "Fraktion" },
-  Fraktionsgebiet: { icon: "🗺️", statId: "statTerritory", label: "Fraktionsgebiete", territory: true }
-};
-
-const RECOGNITION_STATUS_LABELS = {
-  "neu": "Neu",
-  "automatisch erkannt": "Automatisch erkannt",
-  "manuell korrigiert": "Manuell korrigiert",
-  "bestätigt": "Bestätigt",
-  "abgelehnt": "Abgelehnt"
-};
-
-const map = L.map("map", {
-  crs: L.CRS.Simple,
-  minZoom: -4,
-  maxZoom: 1,
-  zoomSnap: 0.25,
-  wheelPxPerZoomLevel: 120,
-  maxBounds: BOUNDS,
-  maxBoundsViscosity: 1.0
-});
-
-L.imageOverlay(MAP_IMAGE, BOUNDS).addTo(map);
-map.fitBounds(BOUNDS);
-map.setZoom(-2);
 
 let markers = [];
 let markerLayers = [];
@@ -353,6 +321,9 @@ function fillForm(marker) {
   document.getElementById("markerLat").value = marker.lat;
   document.getElementById("markerLng").value = marker.lng;
 
+  const img = document.getElementById("markerImage");
+  if (img) img.value = marker.image || "";
+
   const editModeInfo = document.getElementById("editModeInfo");
   if (editModeInfo) editModeInfo.classList.remove("hidden");
 
@@ -360,177 +331,370 @@ function fillForm(marker) {
   updateUserUi();
 }
 
-function prepareNewMarkerFromRecognition(match, imageUrl = "") {
-  selectedMarkerId = null;
-  document.getElementById("markerName").value = "";
-  document.getElementById("markerDescription").value = "";
-  document.getElementById("markerCategory").value = "Dealer";
-  document.getElementById("markerOwner").value = currentUser.username || "";
-  document.getElementById("markerFavorite").checked = false;
-  document.getElementById("markerRadius").value = "200";
-  document.getElementById("markerLat").value = roundCoord(match.lat);
-  document.getElementById("markerLng").value = roundCoord(match.lng);
-
-  const editModeInfo = document.getElementById("editModeInfo");
-  if (editModeInfo) editModeInfo.classList.add("hidden");
-
-  recognitionState.preparedImageUrl = imageUrl || "";
-  updateRadiusFieldVisibility();
-  switchToTab("editor");
-  showMessage("Treffer wurde in den Editor übernommen.");
+function markerToPayload(marker) {
+  return {
+    id: marker.id,
+    name: String(marker.name || "").trim(),
+    description: String(marker.description || "").trim(),
+    category: marker.category,
+    lat: Number(marker.lat),
+    lng: Number(marker.lng),
+    image: marker.image || "",
+    owner: String(marker.owner || "").trim(),
+    favorite: !!marker.favorite,
+    radius: marker.category === "Fraktionsgebiet" ? Number(marker.radius || 200) : 0
+  };
 }
+
+function buildMarkerFromForm() {
+  const name = document.getElementById("markerName").value.trim();
+  const description = document.getElementById("markerDescription").value.trim();
+  const category = document.getElementById("markerCategory").value;
+  const owner = document.getElementById("markerOwner").value.trim();
+  const favorite = !!document.getElementById("markerFavorite").checked;
+  const lat = Number(document.getElementById("markerLat").value);
+  const lng = Number(document.getElementById("markerLng").value);
+  const image = document.getElementById("markerImage")?.value.trim() || "";
+  const radius = category === "Fraktionsgebiet" ? getRadiusValueFromForm() : 0;
+
+  if (!name) throw new Error("Bitte einen Marker-Namen eingeben.");
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) throw new Error("Bitte gültige Koordinaten setzen.");
+
+  return {
+    id: selectedMarkerId || crypto.randomUUID(),
+    name,
+    description,
+    category,
+    lat: roundCoord(lat),
+    lng: roundCoord(lng),
+    image,
+    owner,
+    favorite,
+    radius
+  };
+}
+
+function updateSyncStatus(state = "offline", text = "Offline") {
+  const status = document.getElementById("syncStatus");
+  if (!status) return;
+
+  status.classList.remove("offline", "online", "connecting");
+  status.classList.add(state);
+  status.textContent = text;
+}
+
+function copyToClipboard(text, successMessage = "Kopiert.") {
+  navigator.clipboard.writeText(String(text || "")).then(() => {
+    showMessage(successMessage);
+  }).catch(() => {
+    showMessage("Konnte nicht kopiert werden.", "error");
+  });
+}
+
+function downloadJsonFile(filename, data) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function getSelectedMarker() {
+  return markers.find((marker) => marker.id === selectedMarkerId) || null;
+}
+
+function removeAllMarkerLayers() {
+  markerLayers.forEach((layer) => {
+    try {
+      map.removeLayer(layer);
+    } catch {}
+  });
+
+  markerLayers = [];
+  markerLayerById.clear();
+}
+
+function getMarkerPopupHtml(marker) {
+  const imageHtml = marker.image
+    ? `<img src="${escapeHtml(marker.image)}" alt="${escapeHtml(marker.name)}" class="popup-image" ondblclick="openImageModal('${escapeJsString(marker.image)}')">`
+    : "";
+
+  const ownerHtml = canEditMarkers()
+    ? `<div class="popup-owner">Besitzer/Zuständigkeit: <strong>${escapeHtml(marker.owner || "-")}</strong></div>`
+    : "";
+
+  const favoriteHtml = marker.favorite ? `<span class="favorite-badge">⭐ Favorit</span>` : "";
+  const radiusHtml = marker.category === "Fraktionsgebiet"
+    ? `<div class="popup-radius">Radius: ${formatValue(marker.radius || 200)} m</div>`
+    : "";
+
+  return `
+    <div class="popup-wrap">
+      <div class="popup-title-row">
+        <strong>${escapeHtml(marker.name)}</strong>
+        ${favoriteHtml}
+      </div>
+      <div class="popup-category">${escapeHtml(marker.category)}</div>
+      <div class="popup-description">${escapeHtml(marker.description || "Keine Beschreibung")}</div>
+      ${ownerHtml}
+      ${radiusHtml}
+      ${imageHtml}
+      <div class="popup-actions">
+        <button onclick="editMarkerFromPopup('${escapeJsString(marker.id)}')">Bearbeiten</button>
+        <button onclick="toggleFavoriteFromPopup('${escapeJsString(marker.id)}')">Favorit</button>
+        <button onclick="copyCoordsFromPopup(${Number(marker.lat)}, ${Number(marker.lng)})">Koordinaten</button>
+        ${isAdmin() ? `<button onclick="showMarkerHistory('${escapeJsString(marker.id)}')">Verlauf</button>` : ""}
+        ${isAdmin() ? `<button class="danger" onclick="deleteMarkerFromPopup('${escapeJsString(marker.id)}')">Löschen</button>` : ""}
+      </div>
+    </div>
+  `;
+}
+
+function renderMarkers() {
+  removeAllMarkerLayers();
+
+  const visibleMarkers = getSortedMarkers(getVisibleMarkers());
+
+  visibleMarkers.forEach((marker) => {
+    const markerLayer = L.marker([marker.lat, marker.lng], {
+      icon: icons[marker.category] || icons.Dealer,
+      title: marker.name
+    });
+
+    markerLayer.bindPopup(getMarkerPopupHtml(marker), {
+      maxWidth: 320,
+      closeButton: true,
+      autoPan: true
+    });
+
+    markerLayer.on("click", () => {
+      selectedMarkerId = marker.id;
+      updateUserUi();
+    });
+
+    markerLayer.addTo(map);
+    markerLayers.push(markerLayer);
+    markerLayerById.set(marker.id, markerLayer);
+
+    if (marker.category === "Fraktionsgebiet") {
+      const circle = L.circle([marker.lat, marker.lng], {
+        radius: Number(marker.radius || 200),
+        color: "#7c3aed",
+        fillColor: "#7c3aed",
+        fillOpacity: 0.12,
+        weight: 2
+      }).addTo(map);
+
+      markerLayers.push(circle);
+    }
+  });
+
+  updateStats();
+  renderSearchResults();
+}
+
+function focusMarkerById(id, openPopup = true) {
+  const marker = markers.find((entry) => entry.id === id);
+  if (!marker) return;
+
+  selectedMarkerId = id;
+  updateUserUi();
+
+  map.setView([marker.lat, marker.lng], Math.max(map.getZoom(), -1.5), {
+    animate: true,
+    duration: 0.4
+  });
+
+  if (openPopup) {
+    setTimeout(() => {
+      const layer = markerLayerById.get(id);
+      if (layer) layer.openPopup();
+    }, 150);
+  }
+}
+
+window.editMarkerFromPopup = function (id) {
+  const marker = markers.find((entry) => entry.id === id);
+  if (!marker) return;
+  fillForm(marker);
+  focusMarkerById(id, false);
+  switchToTab("editor");
+};
+
+window.toggleFavoriteFromPopup = async function (id) {
+  const marker = markers.find((entry) => entry.id === id);
+  if (!marker) return;
+  marker.favorite = !marker.favorite;
+
+  try {
+    await saveMarkers();
+    renderMarkers();
+    focusMarkerById(id, true);
+    showMessage(marker.favorite ? "Favorit gesetzt." : "Favorit entfernt.");
+  } catch (error) {
+    console.error(error);
+    showMessage(error.message || "Favorit konnte nicht gespeichert werden.", "error");
+  }
+};
+
+window.copyCoordsFromPopup = function (lat, lng) {
+  copyToClipboard(`${lat}, ${lng}`, "Koordinaten kopiert.");
+};
+
+window.deleteMarkerFromPopup = async function (id) {
+  if (!isAdmin()) return;
+  const marker = markers.find((entry) => entry.id === id);
+  if (!marker) return;
+
+  const confirmed = confirm(`Marker "${marker.name}" wirklich löschen?`);
+  if (!confirmed) return;
+
+  markers = markers.filter((entry) => entry.id !== id);
+  if (selectedMarkerId === id) selectedMarkerId = null;
+
+  try {
+    await saveMarkers();
+    renderMarkers();
+    clearForm();
+    showMessage("Marker gelöscht.");
+  } catch (error) {
+    console.error(error);
+    showMessage(error.message || "Marker konnte nicht gelöscht werden.", "error");
+  }
+};
+
+function updateStats() {
+  const visibleMarkers = getVisibleMarkers();
+
+  Object.entries(CATEGORY_META).forEach(([category, meta]) => {
+    const el = document.getElementById(meta.statId);
+    if (!el) return;
+    el.textContent = visibleMarkers.filter((marker) => marker.category === category).length;
+  });
+
+  const totalEl = document.getElementById("statTotal");
+  if (totalEl) totalEl.textContent = visibleMarkers.length;
+}
+
+function renderSearchResults() {
+  const container = document.getElementById("searchResults");
+  if (!container) return;
+
+  const searchValue = getSearchValue();
+  const visibleMarkers = getSortedMarkers(getVisibleMarkers());
+
+  if (!searchValue) {
+    container.innerHTML = `<div class="search-empty">Gib oben einen Suchbegriff ein oder nutze die Filter.</div>`;
+    return;
+  }
+
+  if (!visibleMarkers.length) {
+    container.innerHTML = `<div class="search-empty">Keine Treffer gefunden.</div>`;
+    return;
+  }
+
+  container.innerHTML = visibleMarkers.slice(0, 40).map((marker) => `
+    <button class="search-result-item" onclick="focusMarkerFromSearch('${escapeJsString(marker.id)}')">
+      <span class="search-result-title">${escapeHtml(marker.name)}</span>
+      <span class="search-result-meta">${escapeHtml(marker.category)}${canEditMarkers() ? ` • ${escapeHtml(marker.owner || "-")}` : ""}</span>
+    </button>
+  `).join("");
+}
+
+window.focusMarkerFromSearch = function (id) {
+  focusMarkerById(id, true);
+};
 
 async function fetchUser() {
   try {
     const res = await fetch("/api/user");
     currentUser = await res.json();
-  } catch {
-    currentUser = {
-      loggedIn: false,
-      username: "",
-      isVip: false,
-      isAdmin: false,
-      isSupport: false,
-      isMapper: false,
-      canEdit: false,
-      canViewDashboard: false,
-      roleNames: [],
-      id: ""
-    };
+    updateUserUi();
+  } catch (error) {
+    console.error(error);
+    showMessage("Benutzerstatus konnte nicht geladen werden.", "error");
   }
-
-  updateUserUi();
 }
 
 function updateUserUi() {
   const loginStatus = document.getElementById("loginStatus");
-  const roleInfo = document.getElementById("roleInfo");
+  const discordLogin = document.getElementById("discordLogin");
   const logoutBtn = document.getElementById("logoutBtn");
-  const vipElements = document.querySelectorAll(".vip-only");
-  const adminElements = document.querySelectorAll(".admin-only");
-  const editorElements = document.querySelectorAll(".editor-only");
-  const dashboardElements = document.querySelectorAll(".dashboard-only");
-  const saveButton = document.getElementById("saveMarker");
-  const historyHint = document.getElementById("historyHint");
   const roleBadges = document.getElementById("roleBadges");
+  const ownerFilterWrap = document.getElementById("ownerFilterWrap");
+  const myMarkersWrap = document.getElementById("myMarkersWrap");
+  const favoritesOnlyWrap = document.getElementById("favoritesOnlyWrap");
+
+  if (loginStatus) {
+    loginStatus.textContent = currentUser.loggedIn ? currentUser.username : "Nicht eingeloggt";
+  }
+
+  if (discordLogin) discordLogin.classList.toggle("hidden", currentUser.loggedIn);
+  if (logoutBtn) logoutBtn.classList.toggle("hidden", !currentUser.loggedIn);
 
   if (roleBadges) {
-    roleBadges.innerHTML = "";
+    roleBadges.innerHTML = (currentUser.roleNames || []).map((role) => `<span class="role-badge">${escapeHtml(role)}</span>`).join("");
   }
 
-  if (!currentUser.loggedIn) {
-    if (loginStatus) loginStatus.textContent = "Nicht eingeloggt";
-    if (roleInfo) roleInfo.textContent = "Discord Login nötig. Marker erstellen/bearbeiten nur mit Admin- oder Mapper-Rolle.";
-    if (logoutBtn) logoutBtn.classList.add("hidden");
-    if (historyHint) historyHint.textContent = "Historie erst nach Admin-Login sichtbar.";
+  if (ownerFilterWrap) ownerFilterWrap.classList.toggle("hidden", !canEditMarkers());
+  if (myMarkersWrap) myMarkersWrap.classList.toggle("hidden", !canEditMarkers());
+  if (favoritesOnlyWrap) favoritesOnlyWrap.classList.remove("hidden");
 
-    vipElements.forEach((el) => el.classList.add("hidden"));
-    adminElements.forEach((el) => el.classList.add("hidden"));
-    editorElements.forEach((el) => el.classList.add("hidden"));
-    dashboardElements.forEach((el) => el.classList.add("hidden"));
+  document.querySelectorAll(".editor-only").forEach((el) => {
+    el.classList.toggle("hidden", !canEditMarkers());
+  });
 
-    if (saveButton) {
-      saveButton.disabled = true;
-      saveButton.textContent = "Nur Admin / Mapper";
-    }
+  document.querySelectorAll(".admin-only").forEach((el) => {
+    el.classList.toggle("hidden", !isAdmin());
+  });
 
-    ensureAllowedActiveTab();
-    renderSearchResults();
-    renderDashboard();
-    renderRecognitionSection();
-    return;
+  document.querySelectorAll(".dashboard-only").forEach((el) => {
+    el.classList.toggle("hidden", !canViewDashboard());
+  });
+
+  document.querySelectorAll(".recognition-admin-only").forEach((el) => {
+    el.classList.toggle("hidden", !isAdmin());
+  });
+
+  const markerOwnerInput = document.getElementById("markerOwner");
+  if (markerOwnerInput && !markerOwnerInput.value && currentUser.loggedIn) {
+    markerOwnerInput.value = currentUser.username || "";
   }
 
-  const roles = Array.isArray(currentUser.roleNames) && currentUser.roleNames.length
-    ? currentUser.roleNames
-    : [
-        currentUser.isAdmin ? "Admin" : "",
-        currentUser.isSupport ? "Support" : "",
-        currentUser.isMapper ? "Mapper" : "",
-        currentUser.isVip ? "VIP" : ""
-      ].filter(Boolean);
-
-  if (loginStatus) loginStatus.textContent = `👤 ${currentUser.username}`;
-  if (roleInfo) {
-    roleInfo.textContent = roles.length
-      ? `Eingeloggt als ${currentUser.username} (${roles.join(" / ")})`
-      : `Eingeloggt als ${currentUser.username}`;
-  }
-
-  if (historyHint) {
-    historyHint.textContent = isAdmin()
-      ? "Wähle einen Marker aus, um seinen Verlauf zu sehen und alte Versionen wiederherzustellen."
-      : "Historie nur für Admins sichtbar.";
-  }
-
-  if (roleBadges) {
-    roleBadges.innerHTML = roles.map((role) => `<span class="role-badge">${escapeHtml(role)}</span>`).join("");
-  }
-
-  if (logoutBtn) logoutBtn.classList.remove("hidden");
-
-  if (isVipOrAdmin()) {
-    vipElements.forEach((el) => el.classList.remove("hidden"));
-  } else {
-    vipElements.forEach((el) => el.classList.add("hidden"));
-  }
-
-  if (isAdmin()) {
-    adminElements.forEach((el) => el.classList.remove("hidden"));
-  } else {
-    adminElements.forEach((el) => el.classList.add("hidden"));
-  }
-
-  if (canEditMarkers()) {
-    editorElements.forEach((el) => el.classList.remove("hidden"));
-  } else {
-    editorElements.forEach((el) => el.classList.add("hidden"));
-  }
-
-  if (canViewDashboard()) {
-    dashboardElements.forEach((el) => el.classList.remove("hidden"));
-  } else {
-    dashboardElements.forEach((el) => el.classList.add("hidden"));
-  }
-
+  const saveButton = document.getElementById("saveMarker");
   if (saveButton) {
-    if (canEditMarkers()) {
-      saveButton.disabled = false;
-      saveButton.textContent = selectedMarkerId ? "Änderungen speichern" : "Speichern";
-    } else {
-      saveButton.disabled = true;
-      saveButton.textContent = "Nur Admin / Mapper";
-    }
+    saveButton.disabled = !canEditMarkers();
+    saveButton.textContent = selectedMarkerId ? "Änderungen speichern" : "Marker speichern";
   }
 
   ensureAllowedActiveTab();
-  renderSearchResults();
-  renderDashboard();
-  renderRecognitionSection();
 }
 
 async function loadMarkers() {
   try {
-    const res = await fetch("/markers");
-    if (!res.ok) throw new Error("Marker konnten nicht geladen werden.");
-
-    markers = await res.json();
+    const response = await fetch("/markers");
+    if (!response.ok) throw new Error("Marker konnten nicht geladen werden.");
+    markers = await response.json();
     renderMarkers();
-    updateStats();
-    renderSearchResults();
   } catch (error) {
     console.error(error);
-    showMessage("Marker konnten nicht geladen werden.", "error");
+    showMessage(error.message || "Marker konnten nicht geladen werden.", "error");
   }
 }
 
 async function saveMarkers() {
+  const payload = markers.map(markerToPayload);
+
   const response = await fetch("/markers", {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({ markers })
+    body: JSON.stringify({ markers: payload })
   });
 
   const data = await response.json();
@@ -539,737 +703,67 @@ async function saveMarkers() {
     throw new Error(data.error || "Marker konnten nicht gespeichert werden.");
   }
 
-  if (Array.isArray(data.markers)) {
-    markers = data.markers;
-  }
-
-  if (canViewDashboard()) {
-    fetchDashboard().catch(() => {});
-  }
-}
-
-function buildPopupHtml(marker) {
-  const descriptionHtml = marker.description
-    ? `<div class="popup-desc">${escapeHtml(marker.description).replace(/\n/g, "<br>")}</div>`
-    : `<div class="popup-desc">Keine Beschreibung vorhanden.</div>`;
-
-  const imageHtml = marker.image
-    ? `
-      <img
-        class="popup-image"
-        src="${escapeHtml(marker.image)}"
-        alt="Marker Screenshot"
-        ondblclick="window.openImageModal('${escapeJsString(marker.image)}')"
-      >
-      <div class="popup-hint">Doppelklick auf das Bild zum Vergrößern</div>
-    `
-    : "";
-
-  const ownerHtml = canEditMarkers()
-    ? `<div class="popup-meta">Besitzer/Zuständigkeit: ${escapeHtml(marker.owner || "-")}</div>`
-    : "";
-
-  const favoriteHtml = marker.favorite
-    ? `<div class="popup-meta">⭐ Favorit</div>`
-    : "";
-
-  const territoryHtml = marker.category === "Fraktionsgebiet"
-    ? `<div class="popup-meta">Gebietsradius: ${escapeHtml(formatValue(marker.radius || 200))} m</div>`
-    : "";
-
-  const adminButtons = canEditMarkers()
-    ? `
-      <button onclick="window.editMarker('${marker.id}')">Bearbeiten</button>
-      <button onclick="window.toggleMarkerFavorite('${marker.id}')">${marker.favorite ? "Favorit entfernen" : "Als Favorit"}</button>
-      <button class="secondary" onclick="window.duplicateMarker('${marker.id}')">Duplizieren</button>
-      ${isAdmin() ? `<button onclick="window.showMarkerHistory('${marker.id}')">Verlauf</button>` : ""}
-      <button class="secondary" onclick="window.copyMarkerOwner('${marker.id}')">Besitzer kopieren</button>
-      ${isAdmin() ? `<button class="secondary" onclick="window.deleteMarker('${marker.id}')">Löschen</button>` : ""}
-    `
-    : "";
-
-  const adminMeta = canEditMarkers()
-    ? `
-      <div class="popup-meta">Erstellt von: ${escapeHtml(marker.createdBy || "-")}</div>
-      <div class="popup-meta">Zuletzt geändert von: ${escapeHtml(marker.updatedBy || "-")}</div>
-      <div class="popup-meta">Letzte Änderung: ${escapeHtml(formatDateTime(marker.updatedAt))}</div>
-    `
-    : "";
-
-  return `
-    <div>
-      <div class="popup-title">${marker.favorite ? "⭐ " : ""}${escapeHtml(marker.name)}</div>
-      <div class="popup-category">Kategorie: ${escapeHtml(marker.category)}</div>
-      ${favoriteHtml}
-      ${ownerHtml}
-      ${territoryHtml}
-      <div class="popup-meta">Lat: ${Number(marker.lat).toFixed(2)} | Lng: ${Number(marker.lng).toFixed(2)}</div>
-      ${adminMeta}
-      ${descriptionHtml}
-      ${imageHtml}
-      <div class="popup-actions">
-        <button onclick="window.copyMarkerCoords('${marker.id}')">Koords kopieren</button>
-        ${adminButtons}
-      </div>
-    </div>
-  `;
-}
-
-function getTerritoryStyle(marker) {
-  const owner = String(marker.owner || "neutral");
-  let hash = 0;
-  for (let i = 0; i < owner.length; i += 1) {
-    hash = ((hash << 5) - hash) + owner.charCodeAt(i);
-    hash |= 0;
-  }
-
-  const palette = ["#5865f2", "#57f287", "#faa61a", "#eb459e", "#3ba55d", "#ed4245"];
-  const index = Math.abs(hash) % palette.length;
-  return {
-    color: palette[index],
-    weight: 2,
-    fillOpacity: 0.12
-  };
-}
-
-function focusMarkerById(id, openPopup = true) {
-  const marker = markers.find((m) => m.id === id);
-  const layer = markerLayerById.get(id);
-  if (!marker || !layer) return;
-
-  map.flyTo([Number(marker.lat), Number(marker.lng)], Math.max(map.getZoom(), -1.25), {
-    duration: 0.6
-  });
-
-  if (openPopup && layer.marker) {
-    setTimeout(() => layer.marker.openPopup(), 250);
-  }
-}
-
-function clearRecognitionMarker() {
-  if (recognitionState.markerLayer) {
-    map.removeLayer(recognitionState.markerLayer);
-    recognitionState.markerLayer = null;
-  }
-}
-
-function setRecognitionMapMarker(lat, lng, label = "Erkannter Treffer") {
-  clearRecognitionMarker();
-
-  recognitionState.markerLayer = L.circleMarker([Number(lat), Number(lng)], {
-    radius: 12,
-    color: "#5a78ff",
-    weight: 3,
-    fillColor: "#5a78ff",
-    fillOpacity: 0.25
-  }).addTo(map);
-
-  recognitionState.markerLayer.bindPopup(`
-    <div>
-      <div class="popup-title">${escapeHtml(label)}</div>
-      <div class="popup-meta">Lat: ${Number(lat).toFixed(2)} | Lng: ${Number(lng).toFixed(2)}</div>
-    </div>
-  `);
-
-  map.flyTo([Number(lat), Number(lng)], Math.max(map.getZoom(), -1.4), {
-    duration: 0.55
-  });
-}
-
-function renderMarkers() {
-  markerLayers.forEach((layer) => {
-    if (layer.group) {
-      map.removeLayer(layer.group);
-    }
-  });
-
-  markerLayers = [];
-  markerLayerById = new Map();
-
-  getSortedMarkers().forEach((marker) => {
-    if (!shouldShowMarker(marker)) return;
-
-    const group = L.layerGroup();
-    let territoryLayer = null;
-
-    if (marker.category === "Fraktionsgebiet") {
-      territoryLayer = L.circle([Number(marker.lat), Number(marker.lng)], {
-        radius: Number(marker.radius) || 200,
-        ...getTerritoryStyle(marker)
-      });
-      territoryLayer.bindPopup(buildPopupHtml(marker));
-      territoryLayer.bindTooltip(`${marker.name} (${Number(marker.radius) || 200}m)`, {
-        className: "territory-label",
-        sticky: true,
-        direction: "top"
-      });
-      territoryLayer.addTo(group);
-    }
-
-    const markerLayer = L.marker([Number(marker.lat), Number(marker.lng)], {
-      icon: icons[marker.category] || icons.Dealer,
-      draggable: canEditMarkers(),
-      title: marker.favorite ? `⭐ ${marker.name}` : marker.name
-    });
-
-    markerLayer.bindTooltip(marker.favorite ? `⭐ ${marker.name}` : (marker.name || "Marker"), {
-      direction: "top",
-      opacity: 0.95
-    });
-
-    markerLayer.bindPopup(buildPopupHtml(marker));
-
-    markerLayer.on("click", () => {
-      map.flyTo([Number(marker.lat), Number(marker.lng)], Math.max(map.getZoom(), -1.5), {
-        duration: 0.45
-      });
-    });
-
-    markerLayer.on("dragend", async (e) => {
-      if (!canEditMarkers()) return;
-
-      try {
-        const pos = e.target.getLatLng();
-        marker.lat = roundCoord(pos.lat);
-        marker.lng = roundCoord(pos.lng);
-
-        await saveMarkers();
-        updateStats();
-        renderMarkers();
-        renderSearchResults();
-        showMessage("Marker verschoben und gespeichert.");
-      } catch (error) {
-        console.error(error);
-        showMessage("Marker konnte nicht verschoben werden.", "error");
-      }
-    });
-
-    markerLayer.addTo(group);
-    group.addTo(map);
-
-    const entry = { id: marker.id, group, marker: markerLayer, territory: territoryLayer };
-    markerLayers.push(entry);
-    markerLayerById.set(marker.id, entry);
-  });
-}
-
-function updateStats() {
-  const visible = getVisibleMarkers();
-  const allVisibleForUser = markers.filter((m) => m.category !== "Schwarzmarkt" || isVipOrAdmin());
-  const favoriteCount = allVisibleForUser.filter((m) => m.favorite).length;
-
-  const statTotal = document.getElementById("statTotal");
-  const statFavorites = document.getElementById("statFavorites");
-  if (statTotal) statTotal.textContent = `Marker sichtbar: ${visible.length}`;
-  if (statFavorites) statFavorites.textContent = `Favoriten: ${favoriteCount}`;
-
-  Object.entries(CATEGORY_META).forEach(([category, meta]) => {
-    const el = document.getElementById(meta.statId);
-    if (!el) return;
-    const count = markers.filter((m) => m.category === category && (category !== "Schwarzmarkt" || isVipOrAdmin())).length;
-    el.textContent = `${meta.label}: ${count}`;
-  });
-}
-
-function renderSearchResults() {
-  const list = document.getElementById("searchResults");
-  if (!list) return;
-
-  const searchValue = getSearchValue();
-  const visible = getSortedMarkers(getVisibleMarkers());
-
-  if (!visible.length) {
-    list.innerHTML = `<div class="status-box">Keine Marker passen zu den aktuellen Filtern.</div>`;
-    return;
-  }
-
-  const categoryOrder = Object.keys(CATEGORY_META);
-  const grouped = new Map();
-
-  visible.forEach((marker) => {
-    const category = marker.category || "Sonstige";
-    if (!grouped.has(category)) grouped.set(category, []);
-    grouped.get(category).push(marker);
-  });
-
-  const sortedCategories = categoryOrder
-    .filter((category) => grouped.has(category))
-    .concat(
-      [...grouped.keys()]
-        .filter((category) => !categoryOrder.includes(category))
-        .sort((a, b) => a.localeCompare(b, "de"))
-    );
-
-  list.innerHTML = sortedCategories.map((category, index) => {
-    const items = grouped.get(category) || [];
-    const meta = CATEGORY_META[category] || { icon: "📍", label: category };
-    const isOpen = searchValue ? "open" : index === 0 ? "open" : "";
-
-    const cards = items.map((marker) => {
-      const owner = canEditMarkers()
-        ? `<div class="search-result-meta">Besitzer: ${escapeHtml(marker.owner || "-")}</div>`
-        : "";
-
-      const territory = marker.category === "Fraktionsgebiet"
-        ? `<div class="search-result-meta">Radius: ${escapeHtml(formatValue(marker.radius || 200))} m</div>`
-        : "";
-
-      return `
-        <div class="search-result">
-          <div class="search-result-title">${marker.favorite ? "⭐ " : ""}${escapeHtml(marker.name)}</div>
-          <div class="search-result-meta">${escapeHtml(category)} • ${Number(marker.lat).toFixed(2)}, ${Number(marker.lng).toFixed(2)}</div>
-          ${owner}
-          ${territory}
-          <div class="search-result-actions">
-            <button onclick="window.focusMarker('${marker.id}')">Auf Karte</button>
-            <button class="secondary" onclick="window.copyMarkerCoords('${marker.id}')">Koords</button>
-            ${canEditMarkers() ? `<button class="secondary" onclick="window.editMarker('${marker.id}')">Bearbeiten</button>` : ""}
-            ${canEditMarkers() ? `<button class="secondary" onclick="window.duplicateMarker('${marker.id}')">Duplizieren</button>` : ""}
-            ${isAdmin() ? `<button class="secondary" onclick="window.showMarkerHistory('${marker.id}')">Verlauf</button>` : ""}
-          </div>
-        </div>
-      `;
-    }).join("");
-
-    return `
-      <details class="search-group" ${isOpen}>
-        <summary class="search-group-summary">
-          <span class="search-group-left">${escapeHtml(meta.icon || "📍")} ${escapeHtml(meta.label || category)}</span>
-          <span class="search-group-right">${items.length}</span>
-        </summary>
-        <div class="search-group-items">
-          ${cards}
-        </div>
-      </details>
-    `;
-  }).join("");
-}
-
-async function uploadImageIfNeeded() {
-  const fileInput = document.getElementById("markerImage");
-  const file = fileInput?.files?.[0];
-  if (!file) return recognitionState.preparedImageUrl || null;
-
-  const formData = new FormData();
-  formData.append("file", file);
-
-  const res = await fetch("/upload", {
-    method: "POST",
-    body: formData
-  });
-
-  const data = await res.json();
-
-  if (!res.ok || data.success === false) {
-    throw new Error(data.error || "Bild konnte nicht hochgeladen werden.");
-  }
-
-  return data.path || recognitionState.preparedImageUrl || "";
-}
-
-async function copyToClipboard(text, successText = "Kopiert.") {
-  try {
-    await navigator.clipboard.writeText(text);
-    showMessage(successText);
-  } catch {
-    showMessage("Kopieren nicht möglich.", "error");
-  }
-}
-
-window.copyMarkerCoords = function (id) {
-  const marker = markers.find((m) => m.id === id);
-  if (!marker) {
-    showMessage("Marker nicht gefunden.", "error");
-    return;
-  }
-
-  copyToClipboard(`${marker.lat}, ${marker.lng}`, "Marker-Koordinaten kopiert.");
-};
-
-window.copyMarkerOwner = function (id) {
-  if (!canEditMarkers()) return;
-  const marker = markers.find((m) => m.id === id);
-  if (!marker) {
-    showMessage("Marker nicht gefunden.", "error");
-    return;
-  }
-
-  copyToClipboard(marker.owner || "", "Besitzer/Zuständigkeit kopiert.");
-};
-
-window.focusMarker = function (id) {
-  focusMarkerById(id, true);
-};
-
-window.openImageModal = function (src) {
-  const modal = document.getElementById("imageModal");
-  const modalImage = document.getElementById("modalImage");
-  if (!modal || !modalImage) return;
-
-  modalImage.src = src;
-  modal.classList.remove("hidden");
-};
-
-window.closeImageModal = function () {
-  const modal = document.getElementById("imageModal");
-  const modalImage = document.getElementById("modalImage");
-  if (!modal || !modalImage) return;
-
-  modal.classList.add("hidden");
-  modalImage.src = "";
-};
-
-function downloadJson(filename, data) {
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-
-  URL.revokeObjectURL(url);
-}
-
-function cryptoRandomId() {
-  if (window.crypto && window.crypto.randomUUID) {
-    return window.crypto.randomUUID();
-  }
-
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  markers = Array.isArray(data.markers) ? data.markers : payload;
 }
 
 async function handleSaveMarker() {
   if (!canEditMarkers()) {
-    showMessage("Nur Admins oder Mapper dürfen Marker erstellen oder bearbeiten.", "error");
-    return;
-  }
-
-  const name = document.getElementById("markerName").value.trim();
-  const description = document.getElementById("markerDescription").value.trim();
-  const category = document.getElementById("markerCategory").value;
-  const ownerInput = document.getElementById("markerOwner").value.trim();
-  const favorite = !!document.getElementById("markerFavorite").checked;
-  const lat = Number(document.getElementById("markerLat").value);
-  const lng = Number(document.getElementById("markerLng").value);
-  const radius = category === "Fraktionsgebiet" ? getRadiusValueFromForm() : 0;
-
-  if (!name) {
-    showMessage("Bitte einen Namen für den Marker eingeben.", "error");
-    return;
-  }
-
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-    showMessage("Bitte gültige Koordinaten eingeben.", "error");
+    showMessage("Du darfst keine Marker bearbeiten.", "error");
     return;
   }
 
   try {
-    const imagePath = await uploadImageIfNeeded();
-    const wasEditing = !!selectedMarkerId;
+    const marker = buildMarkerFromForm();
+    const existingIndex = markers.findIndex((entry) => entry.id === marker.id);
 
-    if (selectedMarkerId) {
-      const marker = markers.find((m) => m.id === selectedMarkerId);
-      if (!marker) throw new Error("Marker wurde nicht gefunden.");
-
-      marker.name = name;
-      marker.description = description;
-      marker.category = category;
-      marker.owner = ownerInput || currentUser.username;
-      marker.favorite = favorite;
-      marker.radius = radius;
-      marker.lat = roundCoord(lat);
-      marker.lng = roundCoord(lng);
-      if (imagePath) marker.image = imagePath;
-      marker.updatedAt = new Date().toISOString();
-      marker.updatedBy = currentUser.username;
+    if (existingIndex >= 0) {
+      markers.splice(existingIndex, 1, marker);
     } else {
-      markers.push({
-        id: cryptoRandomId(),
-        name,
-        description,
-        category,
-        owner: ownerInput || currentUser.username,
-        favorite,
-        radius,
-        lat: roundCoord(lat),
-        lng: roundCoord(lng),
-        image: imagePath || recognitionState.preparedImageUrl || "",
-        createdBy: currentUser.username,
-        updatedBy: currentUser.username,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      });
+      markers.push(marker);
     }
 
     await saveMarkers();
-
-    if (isAdmin() && recognitionState.currentUpload && recognitionState.selectedMatch) {
-      await confirmRecognitionSelection().catch((error) => {
-        console.error(error);
-      });
-    }
-
-    clearForm();
-    recognitionState.preparedImageUrl = "";
     renderMarkers();
-    updateStats();
-    renderSearchResults();
-    showMessage(wasEditing ? "Marker gespeichert." : "Marker erstellt.");
+    fillForm(marker);
+    focusMarkerById(marker.id, true);
+    showMessage(existingIndex >= 0 ? "Marker aktualisiert." : "Marker erstellt.");
   } catch (error) {
     console.error(error);
     showMessage(error.message || "Marker konnte nicht gespeichert werden.", "error");
   }
 }
 
-window.editMarker = function (id) {
-  if (!canEditMarkers()) return;
-
-  const marker = markers.find((m) => m.id === id);
-  if (!marker) {
-    showMessage("Marker konnte nicht geladen werden.", "error");
-    return;
-  }
-
-  fillForm(marker);
-  switchToTab("editor");
-  showMessage("Marker zum Bearbeiten geladen.");
-};
-
-window.toggleMarkerFavorite = async function (id) {
-  if (!canEditMarkers()) return;
-
-  const marker = markers.find((m) => m.id === id);
-  if (!marker) {
-    showMessage("Marker nicht gefunden.", "error");
-    return;
-  }
-
-  try {
-    marker.favorite = !marker.favorite;
-    marker.updatedAt = new Date().toISOString();
-    marker.updatedBy = currentUser.username;
-    await saveMarkers();
-    renderMarkers();
-    updateStats();
-    renderSearchResults();
-    showMessage(marker.favorite ? "Marker als Favorit gespeichert." : "Favorit entfernt.");
-  } catch (error) {
-    console.error(error);
-    showMessage("Favorit konnte nicht gespeichert werden.", "error");
-  }
-};
-
-window.duplicateMarker = async function (id) {
-  if (!canEditMarkers()) return;
-
-  const marker = markers.find((m) => m.id === id);
-  if (!marker) {
-    showMessage("Marker nicht gefunden.", "error");
-    return;
-  }
-
-  const now = new Date().toISOString();
-  const duplicate = {
+function prepareDuplicateMarker(marker) {
+  fillForm({
     ...marker,
-    id: `${marker.id}-copy-${Date.now()}`,
+    id: crypto.randomUUID(),
     name: `${marker.name} Kopie`,
-    lat: roundCoord(Number(marker.lat) + 35),
-    lng: roundCoord(Number(marker.lng) + 35),
-    createdAt: now,
-    updatedAt: now,
-    createdBy: currentUser.username,
-    updatedBy: currentUser.username
-  };
-
-  markers.unshift(duplicate);
-  await saveMarkers();
-  renderMarkers();
-  updateStats();
-  renderSearchResults();
-  fillForm(duplicate);
-  showMessage("Marker dupliziert.");
-};
-
-window.deleteMarker = async function (id) {
-  if (!isAdmin()) return;
-  if (!confirm("Marker wirklich löschen?")) return;
-
-  try {
-    selectedHistoryMarkerId = id;
-    markers = markers.filter((m) => m.id !== id);
-    await saveMarkers();
-    clearForm();
-    renderMarkers();
-    updateStats();
-    renderSearchResults();
-    await window.showMarkerHistory(id);
-    showMessage("Marker gelöscht. Über Verlauf kannst du ihn wiederherstellen.");
-  } catch (error) {
-    console.error(error);
-    showMessage("Marker konnte nicht gelöscht werden.", "error");
-  }
-};
-
-function renderHistory(history) {
-  const title = document.getElementById("historyTitle");
-  const list = document.getElementById("historyList");
-
-  if (!title || !list) return;
-
-  if (!selectedHistoryMarkerId) {
-    title.textContent = "Verlauf";
-    list.innerHTML = `<div class="status-box">Noch kein Marker ausgewählt.</div>`;
-    return;
-  }
-
-  const marker = markers.find((m) => m.id === selectedHistoryMarkerId);
-  title.textContent = marker ? `Verlauf: ${marker.name}` : `Verlauf: ${selectedHistoryMarkerId}`;
-
-  if (!history.length) {
-    list.innerHTML = `<div class="status-box">Keine Historie gefunden.</div>`;
-    return;
-  }
-
-  list.innerHTML = history
-    .map((entry) => {
-      const changesHtml = Array.isArray(entry.changes) && entry.changes.length
-        ? `<ul>${entry.changes.map((change) => `<li><strong>${escapeHtml(change.label || change.field || "Änderung")}</strong>: ${escapeHtml(formatValue(change.before))} → ${escapeHtml(formatValue(change.after))}</li>`).join("")}</ul>`
-        : "";
-
-      const restoreButton = isAdmin()
-        ? `<div class="history-actions"><button onclick="window.restoreHistoryEntry('${entry.historyId}')">Diese Version wiederherstellen</button></div>`
-        : "";
-
-      return `
-        <div class="history-entry">
-          <strong>${escapeHtml(entry.action)}</strong><br>
-          ${escapeHtml(formatDateTime(entry.createdAt))}<br>
-          Admin: ${escapeHtml(entry.adminName || "-")}<br>
-          ${escapeHtml(entry.changeSummary || "-")}
-          ${changesHtml}
-          ${restoreButton}
-        </div>
-      `;
-    })
-    .join("");
+    lat: roundCoord(Number(marker.lat) + 15),
+    lng: roundCoord(Number(marker.lng) + 15)
+  });
+  selectedMarkerId = null;
+  updateUserUi();
+  switchToTab("editor");
 }
 
-window.showMarkerHistory = async function (id) {
-  if (!isAdmin()) return;
-
-  selectedHistoryMarkerId = id;
-  switchToTab("history");
-  renderHistory([]);
-
-  try {
-    const res = await fetch(`/api/marker-history/${encodeURIComponent(id)}`);
-    const data = await res.json();
-
-    if (!res.ok || data.success === false) {
-      throw new Error(data.error || "Historie konnte nicht geladen werden.");
-    }
-
-    renderHistory(Array.isArray(data.history) ? data.history : []);
-  } catch (error) {
-    console.error(error);
-    showMessage(error.message || "Historie konnte nicht geladen werden.", "error");
-    renderHistory([]);
+window.duplicateSelectedMarker = function () {
+  const marker = getSelectedMarker();
+  if (!marker) {
+    showMessage("Kein Marker ausgewählt.", "error");
+    return;
   }
+  prepareDuplicateMarker(marker);
+  showMessage("Kopie vorbereitet.");
 };
 
-window.restoreHistoryEntry = async function (historyId) {
-  if (!isAdmin()) return;
-  if (!confirm("Diese Version wirklich wiederherstellen?")) return;
-
-  try {
-    const res = await fetch(`/api/marker-history-entry/${encodeURIComponent(historyId)}/restore`, {
-      method: "POST"
-    });
-
-    const data = await res.json();
-
-    if (!res.ok || data.success === false) {
-      throw new Error(data.error || "Version konnte nicht wiederhergestellt werden.");
-    }
-
-    await loadMarkers();
-    if (data.marker?.id) {
-      selectedHistoryMarkerId = data.marker.id;
-      await window.showMarkerHistory(data.marker.id);
-      focusMarkerById(data.marker.id, true);
-    }
-    showMessage("Version erfolgreich wiederhergestellt.");
-  } catch (error) {
-    console.error(error);
-    showMessage(error.message || "Version konnte nicht wiederhergestellt werden.", "error");
+window.copySelectedOwner = function () {
+  const marker = getSelectedMarker();
+  if (!marker) {
+    showMessage("Kein Marker ausgewählt.", "error");
+    return;
   }
+  copyToClipboard(marker.owner || "", "Besitzer kopiert.");
 };
-
-async function importMarkersFromFile() {
-  if (!isAdmin()) {
-    showMessage("Nur Admins dürfen importieren.", "error");
-    return;
-  }
-
-  const fileInput = document.getElementById("importFile");
-  const file = fileInput?.files?.[0];
-
-  if (!file) {
-    showMessage("Bitte zuerst eine JSON-Datei auswählen.", "error");
-    return;
-  }
-
-  if (!confirm("Import überschreibt alle aktuellen Marker. Wirklich fortfahren?")) {
-    return;
-  }
-
-  try {
-    const text = await file.text();
-    const parsed = JSON.parse(text);
-    const payload = Array.isArray(parsed) ? parsed : Array.isArray(parsed.markers) ? parsed.markers : null;
-
-    if (!payload) {
-      throw new Error("Ungültige JSON-Datei. Erwartet wird ein Array oder { markers: [...] }.");
-    }
-
-    const res = await fetch("/api/import-markers", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ markers: payload })
-    });
-
-    const data = await res.json();
-
-    if (!res.ok || data.success === false) {
-      throw new Error(data.error || "Import fehlgeschlagen.");
-    }
-
-    markers = Array.isArray(data.markers) ? data.markers : [];
-    selectedHistoryMarkerId = null;
-    clearForm();
-    renderMarkers();
-    updateStats();
-    renderHistory([]);
-    renderSearchResults();
-    fileInput.value = "";
-    showMessage(`Import erfolgreich. Marker importiert: ${data.imported || markers.length}`);
-  } catch (error) {
-    console.error(error);
-    showMessage(error.message || "Import fehlgeschlagen.", "error");
-  }
-}
-
-function setSyncStatus(state = "offline", label = "Offline") {
-  const el = document.getElementById("syncStatus");
-  if (!el) return;
-  el.className = `sync-pill ${state}`;
-  el.textContent = `● ${label}`;
-}
 
 async function fetchDashboard() {
   if (!canViewDashboard()) {
@@ -1279,10 +773,10 @@ async function fetchDashboard() {
   }
 
   try {
-    const res = await fetch("/api/admin-dashboard");
-    const data = await res.json();
+    const response = await fetch("/api/admin-dashboard");
+    const data = await response.json();
 
-    if (!res.ok || data.success === false) {
+    if (!response.ok || data.success === false) {
       throw new Error(data.error || "Dashboard konnte nicht geladen werden.");
     }
 
@@ -1295,78 +789,67 @@ async function fetchDashboard() {
 }
 
 function renderDashboard() {
+  const totals = dashboardState?.metrics || {};
+
   const totalEl = document.getElementById("dashboardTotalMarkers");
   const favoritesEl = document.getElementById("dashboardFavorites");
   const territoriesEl = document.getElementById("dashboardTerritories");
   const blackmarketEl = document.getElementById("dashboardBlackmarket");
   const ownersEl = document.getElementById("dashboardTopOwners");
-  const changesEl = document.getElementById("dashboardRecentChanges");
+  const recentEl = document.getElementById("dashboardRecentChanges");
   const backupsEl = document.getElementById("dashboardBackups");
   const statusEl = document.getElementById("dashboardStatus");
 
-  if (!totalEl || !favoritesEl || !territoriesEl || !blackmarketEl || !ownersEl || !changesEl || !backupsEl || !statusEl) return;
+  if (totalEl) totalEl.textContent = totals.totalMarkers || 0;
+  if (favoritesEl) favoritesEl.textContent = totals.favorites || 0;
+  if (territoriesEl) territoriesEl.textContent = totals.territories || 0;
+  if (blackmarketEl) blackmarketEl.textContent = totals.blackmarket || 0;
 
-  if (!canViewDashboard()) {
-    totalEl.textContent = "0";
-    favoritesEl.textContent = "0";
-    territoriesEl.textContent = "0";
-    blackmarketEl.textContent = "0";
-    ownersEl.innerHTML = `<div class="status-box">Dashboard nur für berechtigte Rollen sichtbar.</div>`;
-    changesEl.innerHTML = `<div class="status-box">Keine Daten.</div>`;
-    backupsEl.innerHTML = `<div class="status-box">Keine Daten.</div>`;
-    statusEl.textContent = "Live-Übersicht für Admin / Support.";
-    return;
+  if (statusEl) {
+    statusEl.textContent = lastSyncMessageAt
+      ? `Live-Sync aktiv • letzte Aktualisierung ${formatDateTime(lastSyncMessageAt)}`
+      : "Live-Sync aktiv";
   }
 
-  if (!dashboardState) {
-    ownersEl.innerHTML = `<div class="status-box">Dashboard wird geladen...</div>`;
-    changesEl.innerHTML = `<div class="status-box">Dashboard wird geladen...</div>`;
-    backupsEl.innerHTML = `<div class="status-box">Dashboard wird geladen...</div>`;
-    return;
-  }
-
-  const metrics = dashboardState.metrics || {};
-  totalEl.textContent = String(metrics.totalMarkers || 0);
-  favoritesEl.textContent = String(metrics.favorites || 0);
-  territoriesEl.textContent = String(metrics.territories || 0);
-  blackmarketEl.textContent = String(metrics.blackmarket || 0);
-  statusEl.textContent = lastSyncMessageAt
-    ? `Live-Sync aktiv • letzte Aktualisierung ${formatDateTime(lastSyncMessageAt)}`
-    : "Live-Sync aktiv";
-
-  const topOwners = Array.isArray(dashboardState.topOwners) ? dashboardState.topOwners : [];
-  ownersEl.innerHTML = topOwners.length
-    ? topOwners.map((entry) => `
-        <div class="dashboard-item">
-          <strong>${escapeHtml(entry.owner)}</strong>
-          <span>${escapeHtml(String(entry.count))} Marker</span>
-        </div>
-      `).join("")
-    : `<div class="status-box">Noch keine Zuständigkeiten.</div>`;
-
-  const recentChanges = Array.isArray(dashboardState.recentChanges) ? dashboardState.recentChanges : [];
-  changesEl.innerHTML = recentChanges.length
-    ? recentChanges.map((entry) => `
-        <div class="dashboard-item dashboard-item-stack">
-          <strong>${escapeHtml(entry.markerName || entry.markerId)}</strong>
-          <span>${escapeHtml(entry.action)} • ${escapeHtml(entry.adminName || "-")}</span>
-          <small>${escapeHtml(formatDateTime(entry.createdAt))}</small>
-        </div>
-      `).join("")
-    : `<div class="status-box">Noch keine Änderungen.</div>`;
-
-  const backups = Array.isArray(dashboardState.backups) ? dashboardState.backups : [];
-  backupsEl.innerHTML = backups.length
-    ? backups.map((entry, index) => `
-        <div class="dashboard-item">
-          <div>
-            <strong>${escapeHtml(entry.file)}</strong>
-            <div class="dashboard-meta">${escapeHtml(formatDateTime(entry.createdAt))}</div>
+  if (ownersEl) {
+    const topOwners = dashboardState?.topOwners || [];
+    ownersEl.innerHTML = topOwners.length
+      ? topOwners.map((entry) => `
+          <div class="dashboard-list-item">
+            <span>${escapeHtml(entry.owner || "-")}</span>
+            <strong>${entry.count}</strong>
           </div>
-          ${isAdmin() ? `<button class="secondary" onclick="window.downloadBackup('${escapeJsString(entry.file)}')">${index === 0 ? "Neueste laden" : "Laden"}</button>` : ""}
-        </div>
-      `).join("")
-    : `<div class="status-box">Noch keine Backups.</div>`;
+        `).join("")
+      : `<div class="dashboard-empty">Keine Daten vorhanden.</div>`;
+  }
+
+  if (recentEl) {
+    const recent = dashboardState?.recentChanges || [];
+    recentEl.innerHTML = recent.length
+      ? recent.map((entry) => `
+          <div class="dashboard-list-item dashboard-list-item-stack">
+            <strong>${escapeHtml(entry.markerName || entry.markerId || "Marker")}</strong>
+            <span>${escapeHtml(entry.action || "-")} • ${escapeHtml(entry.adminName || "-")}</span>
+            <small>${escapeHtml(formatDateTime(entry.createdAt))}</small>
+          </div>
+        `).join("")
+      : `<div class="dashboard-empty">Noch keine Änderungen.</div>`;
+  }
+
+  if (backupsEl) {
+    const backups = dashboardState?.backups || [];
+    backupsEl.innerHTML = backups.length
+      ? backups.map((entry) => `
+          <div class="dashboard-list-item">
+            <div>
+              <strong>${escapeHtml(entry.file)}</strong>
+              <div class="dashboard-meta">${escapeHtml(formatDateTime(entry.createdAt))}</div>
+            </div>
+            ${isAdmin() ? `<button onclick="downloadBackup('${escapeJsString(entry.file)}')">Laden</button>` : ""}
+          </div>
+        `).join("")
+      : `<div class="dashboard-empty">Noch keine Backups.</div>`;
+  }
 }
 
 window.downloadBackup = function (file) {
@@ -1378,11 +861,13 @@ window.createManualBackup = async function () {
   if (!isAdmin()) return;
 
   try {
-    const res = await fetch("/api/backups/create", { method: "POST" });
-    const data = await res.json();
-    if (!res.ok || data.success === false) {
+    const response = await fetch("/api/backups/create", { method: "POST" });
+    const data = await response.json();
+
+    if (!response.ok || data.success === false) {
       throw new Error(data.error || "Backup konnte nicht erstellt werden.");
     }
+
     await fetchDashboard();
     showMessage(`Backup erstellt: ${data.backup?.filename || "ok"}`);
   } catch (error) {
@@ -1391,240 +876,280 @@ window.createManualBackup = async function () {
   }
 };
 
-function startLiveSync() {
-  if (liveSyncSource) {
-    liveSyncSource.close();
+async function importMarkersFromFile() {
+  if (!isAdmin()) {
+    showMessage("Nur Admins dürfen importieren.", "error");
+    return;
   }
 
-  setSyncStatus("connecting", "Verbinde…");
-  liveSyncSource = new EventSource("/api/stream");
+  const input = document.getElementById("importFile");
+  const file = input?.files?.[0];
 
-  liveSyncSource.addEventListener("connected", () => {
-    setSyncStatus("online", "Live-Sync");
-  });
+  if (!file) {
+    showMessage("Bitte zuerst eine Datei auswählen.", "error");
+    return;
+  }
 
-  liveSyncSource.addEventListener("markers-updated", async (event) => {
-    lastSyncMessageAt = new Date().toISOString();
-    setSyncStatus("online", "Live-Sync");
+  const confirmed = confirm("Import überschreibt alle aktuellen Marker. Wirklich fortfahren?");
+  if (!confirmed) return;
+
+  try {
+    const text = await file.text();
+    const parsed = JSON.parse(text);
+
+    const response = await fetch("/api/import-markers", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(Array.isArray(parsed) ? parsed : parsed.markers || [])
+    });
+
+    const data = await response.json();
+    if (!response.ok || data.success === false) {
+      throw new Error(data.error || "Import fehlgeschlagen.");
+    }
+
+    await loadMarkers();
+    await fetchDashboard();
+    showMessage(`Import erfolgreich. Marker importiert: ${data.imported || 0}`);
+  } catch (error) {
+    console.error(error);
+    showMessage(error.message || "Import fehlgeschlagen.", "error");
+  }
+}
+
+async function loadMarkerHistory(markerId) {
+  const response = await fetch(`/api/marker-history/${encodeURIComponent(markerId)}`);
+  const data = await response.json();
+
+  if (!response.ok || data.success === false) {
+    throw new Error(data.error || "Historie konnte nicht geladen werden.");
+  }
+
+  return data.history || [];
+}
+
+function renderMarkerHistory(entries) {
+  const container = document.getElementById("historyList");
+  if (!container) return;
+
+  if (!entries.length) {
+    container.innerHTML = `<div class="history-empty">Keine Historie vorhanden.</div>`;
+    return;
+  }
+
+  container.innerHTML = entries.map((entry) => `
+    <div class="history-item">
+      <div class="history-head">
+        <strong>${escapeHtml(entry.action || "-")}</strong>
+        <span>${escapeHtml(formatDateTime(entry.createdAt))}</span>
+      </div>
+      <div class="history-meta">Admin: ${escapeHtml(entry.adminName || "-")}</div>
+      <div class="history-summary">${escapeHtml(entry.changeSummary || "-")}</div>
+      ${(entry.changes || []).length ? `<ul class="history-changes">${entry.changes.map((change) => `<li><strong>${escapeHtml(change.label || change.key || "Änderung")}</strong>: ${escapeHtml(formatValue(change.before))} → ${escapeHtml(formatValue(change.after))}</li>`).join("")}</ul>` : ""}
+      ${isAdmin() ? `<button onclick="restoreHistoryEntry(${Number(entry.historyId)})">Wiederherstellen</button>` : ""}
+    </div>
+  `).join("");
+}
+
+window.showMarkerHistory = async function (markerId) {
+  if (!isAdmin()) return;
+  selectedHistoryMarkerId = markerId;
+  switchToTab("history");
+
+  try {
+    const history = await loadMarkerHistory(markerId);
+    renderMarkerHistory(history);
+  } catch (error) {
+    console.error(error);
+    showMessage(error.message || "Historie konnte nicht geladen werden.", "error");
+  }
+};
+
+window.restoreHistoryEntry = async function (historyId) {
+  if (!isAdmin()) return;
+  if (!confirm("Diese Version wirklich wiederherstellen?")) return;
+
+  try {
+    const response = await fetch(`/api/marker-history-entry/${encodeURIComponent(historyId)}/restore`, {
+      method: "POST"
+    });
+    const data = await response.json();
+
+    if (!response.ok || data.success === false) {
+      throw new Error(data.error || "Version konnte nicht wiederhergestellt werden.");
+    }
+
+    await loadMarkers();
+    await fetchDashboard();
+    if (selectedHistoryMarkerId) {
+      await window.showMarkerHistory(selectedHistoryMarkerId);
+    }
+    showMessage("Version wiederhergestellt.");
+  } catch (error) {
+    console.error(error);
+    showMessage(error.message || "Version konnte nicht wiederhergestellt werden.", "error");
+  }
+};
+
+function clearRecognitionMarker() {
+  if (recognitionState.markerLayer) {
     try {
-      const payload = JSON.parse(event.data || "{}");
-      await loadMarkers();
-      if (canViewDashboard()) {
-        await fetchDashboard();
-      }
-      if (isAdmin()) {
-        await refreshRecognitionUploads();
-        await refreshRecognitionReferences();
-        await refreshRecognitionOverview();
-      }
-      if (payload.actor && payload.actor !== currentUser.username) {
-        showMessage(`Live-Update von ${payload.actor} übernommen.`);
-      }
-    } catch (error) {
-      console.error(error);
-    }
-  });
-
-  liveSyncSource.addEventListener("backup-created", async () => {
-    lastSyncMessageAt = new Date().toISOString();
-    setSyncStatus("online", "Backup live");
-    if (canViewDashboard()) {
-      await fetchDashboard();
-    }
-  });
-
-  liveSyncSource.addEventListener("ping", () => {
-    setSyncStatus("online", "Live-Sync");
-  });
-
-  liveSyncSource.onerror = () => {
-    setSyncStatus("offline", "Neu verbinden…");
-  };
+      map.removeLayer(recognitionState.markerLayer);
+    } catch {}
+    recognitionState.markerLayer = null;
+  }
 }
 
-function getScoreClass(score) {
-  if (Number(score) >= 80) return "high";
-  if (Number(score) >= 55) return "medium";
-  return "low";
+function setRecognitionMapMarker(lat, lng, label = "Treffer") {
+  clearRecognitionMarker();
+  recognitionState.markerLayer = L.marker([lat, lng]).addTo(map);
+  recognitionState.markerLayer.bindPopup(label).openPopup();
+  map.setView([lat, lng], Math.max(map.getZoom(), -1.5), {
+    animate: true,
+    duration: 0.35
+  });
 }
 
-function getStatusLabel(status) {
+function getRecognitionStatusLabel(status) {
   return RECOGNITION_STATUS_LABELS[status] || status || "-";
 }
 
+function getScoreClass(score) {
+  if (score >= 80) return "high";
+  if (score >= 55) return "medium";
+  return "low";
+}
+
 function renderRecognitionSection() {
+  renderRecognitionOverview();
+  renderRecognitionUploads();
   renderRecognitionPreview();
   renderRecognitionMatches();
-  renderRecognitionUploads();
   renderRecognitionReferences();
-  renderRecognitionOverview();
+}
+
+function renderRecognitionOverview() {
+  const totalUploads = document.getElementById("recognitionTotalUploads");
+  const totalReferences = document.getElementById("recognitionTotalReferences");
+  const breakdown = document.getElementById("recognitionStatusBreakdown");
+
+  if (totalUploads) totalUploads.textContent = recognitionState.overview?.totalUploads || 0;
+  if (totalReferences) totalReferences.textContent = recognitionState.overview?.totalReferences || 0;
+
+  if (breakdown) {
+    const items = recognitionState.overview?.statusBreakdown || [];
+    breakdown.innerHTML = items.length
+      ? items.map((entry) => `
+          <div class="dashboard-list-item">
+            <span>${escapeHtml(getRecognitionStatusLabel(entry.status))}</span>
+            <strong>${entry.count}</strong>
+          </div>
+        `).join("")
+      : `<div class="dashboard-empty">Keine Daten vorhanden.</div>`;
+  }
+}
+
+function renderRecognitionUploads() {
+  const list = document.getElementById("recognitionUploads");
+  if (!list) return;
+
+  const uploads = recognitionState.uploads || [];
+  if (!uploads.length) {
+    list.innerHTML = `<div class="dashboard-empty">Noch keine Uploads vorhanden.</div>`;
+    return;
+  }
+
+  list.innerHTML = uploads.map((entry) => `
+    <button class="recognition-upload-item ${recognitionState.currentUpload?.uploadId === entry.uploadId ? "selected" : ""}" onclick="selectRecognitionUpload(${Number(entry.uploadId)})">
+      <span>${escapeHtml(entry.fileName || `Upload ${entry.uploadId}`)}</span>
+      <small>${escapeHtml(getRecognitionStatusLabel(entry.status))}</small>
+    </button>
+  `).join("");
 }
 
 function renderRecognitionPreview() {
-  const wrap = document.getElementById("recognitionPreviewWrap");
-  const empty = document.getElementById("recognitionPreviewEmpty");
   const image = document.getElementById("recognitionPreviewImage");
-  const typeEl = document.getElementById("recognitionImageType");
-  const statusEl = document.getElementById("recognitionStatus");
-  const uploadedByEl = document.getElementById("recognitionUploadedBy");
-
-  if (!wrap || !empty || !image || !typeEl || !statusEl || !uploadedByEl) return;
+  const empty = document.getElementById("recognitionPreviewEmpty");
+  const imageType = document.getElementById("recognitionImageType");
+  const status = document.getElementById("recognitionStatus");
+  const uploadedBy = document.getElementById("recognitionUploadedBy");
 
   const upload = recognitionState.currentUpload;
 
   if (!upload) {
-    wrap.classList.add("empty");
-    empty.classList.remove("hidden");
-    image.classList.add("hidden");
-    image.src = "";
-    typeEl.textContent = "-";
-    statusEl.textContent = "-";
-    uploadedByEl.textContent = "-";
+    if (image) image.classList.add("hidden");
+    if (empty) empty.classList.remove("hidden");
+    if (imageType) imageType.textContent = "-";
+    if (status) status.textContent = "-";
+    if (uploadedBy) uploadedBy.textContent = "-";
     return;
   }
 
-  wrap.classList.remove("empty");
-  empty.classList.add("hidden");
-  image.classList.remove("hidden");
-  image.src = upload.imageUrl || "";
-  typeEl.textContent = upload.imageType === "ingame" ? "Ingame-Bild" : "Kartenbild";
-  statusEl.textContent = getStatusLabel(upload.status);
-  uploadedByEl.textContent = upload.uploadedBy || "-";
-}
-
-function selectRecognitionMatch(match) {
-  recognitionState.selectedMatch = match || null;
-
-  if (match) {
-    setRecognitionMapMarker(match.lat, match.lng, `${match.markerName} • ${match.score}%`);
-  } else {
-    clearRecognitionMarker();
+  if (image) {
+    image.classList.remove("hidden");
+    image.src = upload.imageUrl || "";
   }
-
-  renderRecognitionMatches();
+  if (empty) empty.classList.add("hidden");
+  if (imageType) imageType.textContent = upload.imageType === "ingame" ? "Ingame-Bild" : "Kartenbild";
+  if (status) status.textContent = getRecognitionStatusLabel(upload.status);
+  if (uploadedBy) uploadedBy.textContent = upload.uploadedBy || "-";
 }
 
 function renderRecognitionMatches() {
-  const list = document.getElementById("recognitionMatches");
-  if (!list) return;
+  const container = document.getElementById("recognitionMatches");
+  if (!container) return;
 
-  const matches = Array.isArray(recognitionState.currentMatches) ? recognitionState.currentMatches : [];
-
+  const matches = recognitionState.currentMatches || [];
   if (!matches.length) {
-    list.innerHTML = `<div class="status-box">Noch keine Erkennung durchgeführt.</div>`;
+    container.innerHTML = `<div class="dashboard-empty">Noch keine Erkennung durchgeführt.</div>`;
     return;
   }
 
-  list.innerHTML = matches.map((match, index) => {
-    const selected = recognitionState.selectedMatch?.markerId === match.markerId ? "selected" : "";
-    return `
-      <div class="recognition-match-card ${selected}">
-        <div class="recognition-match-top">
-          <div class="recognition-match-title">#${index + 1} ${escapeHtml(match.markerName || match.markerId)}</div>
-          <div class="score-pill ${getScoreClass(match.score)}">${escapeHtml(String(match.score))}%</div>
-        </div>
-
-        <div class="recognition-match-meta">
-          Marker-ID: ${escapeHtml(match.markerId || "-")}<br>
-          Koordinaten: ${escapeHtml(formatValue(match.lat))}, ${escapeHtml(formatValue(match.lng))}<br>
-          Grund: ${escapeHtml(match.reason || "-")}
-        </div>
-
-        <div class="recognition-card-actions">
-          <button onclick="window.chooseRecognitionMatch('${escapeJsString(match.markerId)}')">
-            ${selected ? "Ausgewählt" : "Diesen Treffer wählen"}
-          </button>
-          <button class="secondary" onclick="window.focusRecognitionMatch('${escapeJsString(match.markerId)}')">Auf Karte</button>
-        </div>
+  container.innerHTML = matches.map((match, index) => `
+    <div class="recognition-match-card ${recognitionState.selectedMatch?.markerId === match.markerId ? "selected" : ""}">
+      <div class="recognition-match-top">
+        <strong>#${index + 1} ${escapeHtml(match.markerName || match.markerId)}</strong>
+        <span class="score-pill ${getScoreClass(Number(match.score || 0))}">${Number(match.score || 0)}%</span>
       </div>
-    `;
-  }).join("");
-}
-
-function renderRecognitionUploads() {
-  const list = document.getElementById("recognitionRecentUploads");
-  if (!list) return;
-
-  const uploads = Array.isArray(recognitionState.uploads) ? recognitionState.uploads.slice(0, 8) : [];
-
-  if (!uploads.length) {
-    list.innerHTML = `<div class="status-box">Noch keine Uploads.</div>`;
-    return;
-  }
-
-  list.innerHTML = uploads.map((upload) => `
-    <div class="recognition-upload-card">
-      <div class="recognition-upload-top">
-        <div class="recognition-upload-title">${escapeHtml(upload.fileName || `Upload #${upload.uploadId}`)}</div>
-        <div class="type-pill">${upload.imageType === "ingame" ? "Ingame" : "Karte"}</div>
+      <div class="recognition-match-meta">
+        Marker-ID: ${escapeHtml(match.markerId || "-")}<br>
+        Koordinaten: ${escapeHtml(formatValue(match.lat))}, ${escapeHtml(formatValue(match.lng))}<br>
+        Grund: ${escapeHtml(match.reason || "-")}
       </div>
-
-      <div class="recognition-upload-meta">
-        Status: <span class="status-pill ${escapeHtml(String(upload.status || '').toLowerCase().replace(/\s+/g, '-'))}">${escapeHtml(getStatusLabel(upload.status))}</span><br>
-        Upload von: ${escapeHtml(upload.uploadedBy || "-")}<br>
-        Erstellt: ${escapeHtml(formatDateTime(upload.createdAt))}
-      </div>
-
-      <div class="recognition-card-actions">
-        <button onclick="window.loadRecognitionUpload(${Number(upload.uploadId)})">Öffnen</button>
-        <button class="secondary" onclick="window.openImageModal('${escapeJsString(upload.imageUrl || "")}')">Bild</button>
+      <div class="recognition-match-actions">
+        <button onclick="selectRecognitionMatchById('${escapeJsString(match.markerId)}')">Auswählen</button>
+        <button onclick="focusRecognitionMatchById('${escapeJsString(match.markerId)}')">Auf Karte</button>
       </div>
     </div>
   `).join("");
 }
 
-function renderRecognitionOverview() {
-  const totalUploads = document.getElementById("recognitionTotalUploads");
-  const totalRefs = document.getElementById("recognitionTotalReferences");
-  const confirmed = document.getElementById("recognitionConfirmedCount");
-  const rejected = document.getElementById("recognitionRejectedCount");
-
-  if (!totalUploads || !totalRefs || !confirmed || !rejected) return;
-
-  const overview = recognitionState.overview || {};
-  totalUploads.textContent = String(overview.totalUploads || 0);
-  totalRefs.textContent = String(overview.totalReferences || 0);
-
-  const breakdown = Array.isArray(overview.statusBreakdown) ? overview.statusBreakdown : [];
-  const confirmedItem = breakdown.find((entry) => entry.status === "bestätigt");
-  const rejectedItem = breakdown.find((entry) => entry.status === "abgelehnt");
-
-  confirmed.textContent = String(confirmedItem?.count || 0);
-  rejected.textContent = String(rejectedItem?.count || 0);
-}
-
 function renderRecognitionReferences() {
-  const grid = document.getElementById("referenceList");
+  const grid = document.getElementById("referenceGrid");
   if (!grid) return;
 
-  const references = Array.isArray(recognitionState.references) ? recognitionState.references : [];
-
-  if (!references.length) {
-    grid.innerHTML = `<div class="status-box">Noch keine Referenzen geladen.</div>`;
+  const refs = recognitionState.references || [];
+  if (!refs.length) {
+    grid.innerHTML = `<div class="dashboard-empty">Noch keine Referenzen vorhanden.</div>`;
     return;
   }
 
-  grid.innerHTML = references.map((ref) => `
+  grid.innerHTML = refs.map((ref) => `
     <div class="reference-card">
-      ${ref.imageUrl ? `<img class="reference-image" src="${escapeHtml(ref.imageUrl)}" alt="Referenzbild" ondblclick="window.openImageModal('${escapeJsString(ref.imageUrl)}')">` : ""}
+      ${ref.imageUrl ? `<img src="${escapeHtml(ref.imageUrl)}" alt="Referenzbild" class="reference-image" ondblclick="openImageModal('${escapeJsString(ref.imageUrl)}')">` : ""}
       <div class="reference-content">
-        <div class="reference-top">
-          <div class="reference-title">${escapeHtml(ref.markerName || ref.markerId || "Unbekannt")}</div>
-          <div class="type-pill">${ref.imageType === "ingame" ? "Ingame" : "Karte"}</div>
-        </div>
-
+        <strong>${escapeHtml(ref.markerName || ref.markerId || "Unbekannt")}</strong>
         <div class="reference-meta">
+          Typ: ${ref.imageType === "ingame" ? "Ingame" : "Karte"}<br>
           Marker-ID: ${escapeHtml(ref.markerId || "-")}<br>
-          Status: ${escapeHtml(getStatusLabel(ref.status))}<br>
           Koordinaten: ${escapeHtml(formatValue(ref.lat))}, ${escapeHtml(formatValue(ref.lng))}<br>
-          Erstellt von: ${escapeHtml(ref.createdBy || "-")}<br>
           Erstellt: ${escapeHtml(formatDateTime(ref.createdAt))}
         </div>
-
         <div class="reference-actions">
-          <button class="secondary" onclick="window.openImageModal('${escapeJsString(ref.imageUrl || "")}')">Bild</button>
-          <button class="secondary" onclick="window.focusReference('${escapeJsString(ref.markerId || "")}', ${Number(ref.lat ?? 0)}, ${Number(ref.lng ?? 0)})">Auf Karte</button>
-          <button class="secondary" onclick="window.deleteReference(${Number(ref.referenceId)})">Löschen</button>
+          <button onclick="focusReference('${escapeJsString(ref.markerId || "")}', ${Number(ref.lat || 0)}, ${Number(ref.lng || 0)})">Auf Karte</button>
+          ${isAdmin() ? `<button onclick="deleteReference(${Number(ref.referenceId)})">Löschen</button>` : ""}
         </div>
       </div>
     </div>
@@ -1633,14 +1158,12 @@ function renderRecognitionReferences() {
 
 async function refreshRecognitionOverview() {
   if (!isAdmin()) return;
-
   try {
-    const res = await fetch("/api/image-intelligence/overview");
-    const data = await res.json();
-    if (!res.ok || data.success === false) {
+    const response = await fetch("/api/image-intelligence/overview");
+    const data = await response.json();
+    if (!response.ok || data.success === false) {
       throw new Error(data.error || "Übersicht konnte nicht geladen werden.");
     }
-
     recognitionState.overview = data;
     renderRecognitionOverview();
   } catch (error) {
@@ -1650,27 +1173,20 @@ async function refreshRecognitionOverview() {
 
 async function refreshRecognitionUploads() {
   if (!isAdmin()) return;
-
   try {
-    const res = await fetch("/api/image-intelligence/uploads");
-    const data = await res.json();
-    if (!res.ok || data.success === false) {
+    const response = await fetch("/api/image-intelligence/uploads");
+    const data = await response.json();
+    if (!response.ok || data.success === false) {
       throw new Error(data.error || "Uploads konnten nicht geladen werden.");
     }
 
-    recognitionState.uploads = Array.isArray(data.uploads) ? data.uploads : [];
+    recognitionState.uploads = data.uploads || [];
 
     if (recognitionState.currentUpload) {
       const fresh = recognitionState.uploads.find((entry) => entry.uploadId === recognitionState.currentUpload.uploadId);
       if (fresh) {
         recognitionState.currentUpload = fresh;
-        recognitionState.currentMatches = Array.isArray(fresh.matches) ? fresh.matches : [];
-        if (recognitionState.currentMatches.length) {
-          const selectedStillExists = recognitionState.currentMatches.find((entry) => entry.markerId === recognitionState.selectedMatch?.markerId);
-          recognitionState.selectedMatch = selectedStillExists || recognitionState.currentMatches[0];
-        } else {
-          recognitionState.selectedMatch = null;
-        }
+        recognitionState.currentMatches = fresh.matches || [];
       }
     }
 
@@ -1684,16 +1200,14 @@ async function refreshRecognitionUploads() {
 
 async function refreshRecognitionReferences(type = recognitionState.referenceType || "map") {
   if (!isAdmin()) return;
-
   try {
     recognitionState.referenceType = type;
-    const res = await fetch(`/api/image-intelligence/references?type=${encodeURIComponent(type)}`);
-    const data = await res.json();
-    if (!res.ok || data.success === false) {
+    const response = await fetch(`/api/image-intelligence/references?type=${encodeURIComponent(type)}`);
+    const data = await response.json();
+    if (!response.ok || data.success === false) {
       throw new Error(data.error || "Referenzen konnten nicht geladen werden.");
     }
-
-    recognitionState.references = Array.isArray(data.references) ? data.references : [];
+    recognitionState.references = data.references || [];
     renderRecognitionReferences();
   } catch (error) {
     console.error(error);
@@ -1701,28 +1215,27 @@ async function refreshRecognitionReferences(type = recognitionState.referenceTyp
 }
 
 async function uploadRecognitionImage(imageType, file) {
-  if (!isAdmin()) return;
-  if (!file) return;
+  if (!isAdmin() || !file) return;
 
-  const formData = new FormData();
-  formData.append("file", file);
-  formData.append("imageType", imageType);
+  const body = new FormData();
+  body.append("file", file);
+  body.append("imageType", imageType);
 
   try {
     showMessage("Bild wird verarbeitet...");
-    const res = await fetch("/api/image-intelligence/upload", {
+
+    const response = await fetch("/api/image-intelligence/upload", {
       method: "POST",
-      body: formData
+      body
     });
+    const data = await response.json();
 
-    const data = await res.json();
-
-    if (!res.ok || data.success === false) {
+    if (!response.ok || data.success === false) {
       throw new Error(data.error || "Bild konnte nicht erkannt werden.");
     }
 
     recognitionState.currentUpload = data.upload || null;
-    recognitionState.currentMatches = Array.isArray(data.matches) ? data.matches : [];
+    recognitionState.currentMatches = data.matches || [];
     recognitionState.selectedMatch = recognitionState.currentMatches[0] || null;
     recognitionState.manualPlacementMode = false;
 
@@ -1732,15 +1245,13 @@ async function uploadRecognitionImage(imageType, file) {
         recognitionState.selectedMatch.lng,
         `${recognitionState.selectedMatch.markerName} • ${recognitionState.selectedMatch.score}%`
       );
-    } else {
-      clearRecognitionMarker();
     }
 
+    await refreshRecognitionOverview();
+    await refreshRecognitionUploads();
+    await refreshRecognitionReferences(recognitionState.referenceType || "map");
     renderRecognitionSection();
     switchToTab("recognition");
-    await refreshRecognitionUploads();
-    await refreshRecognitionReferences();
-    await refreshRecognitionOverview();
     showMessage("Bild erkannt. Treffer wurden vorbereitet.");
   } catch (error) {
     console.error(error);
@@ -1748,24 +1259,12 @@ async function uploadRecognitionImage(imageType, file) {
   }
 }
 
-window.chooseRecognitionMatch = function (markerId) {
-  const match = recognitionState.currentMatches.find((entry) => entry.markerId === markerId);
-  if (!match) return;
-  selectRecognitionMatch(match);
-};
-
-window.focusRecognitionMatch = function (markerId) {
-  const match = recognitionState.currentMatches.find((entry) => entry.markerId === markerId);
-  if (!match) return;
-  selectRecognitionMatch(match);
-};
-
-window.loadRecognitionUpload = function (uploadId) {
+window.selectRecognitionUpload = function (uploadId) {
   const upload = recognitionState.uploads.find((entry) => Number(entry.uploadId) === Number(uploadId));
   if (!upload) return;
 
   recognitionState.currentUpload = upload;
-  recognitionState.currentMatches = Array.isArray(upload.matches) ? upload.matches : [];
+  recognitionState.currentMatches = upload.matches || [];
   recognitionState.selectedMatch = recognitionState.currentMatches[0] || null;
   recognitionState.manualPlacementMode = false;
 
@@ -1775,12 +1274,25 @@ window.loadRecognitionUpload = function (uploadId) {
       recognitionState.selectedMatch.lng,
       `${recognitionState.selectedMatch.markerName} • ${recognitionState.selectedMatch.score}%`
     );
-  } else {
-    clearRecognitionMarker();
   }
 
   renderRecognitionSection();
-  switchToTab("recognition");
+};
+
+window.selectRecognitionMatchById = function (markerId) {
+  const match = recognitionState.currentMatches.find((entry) => entry.markerId === markerId);
+  if (!match) return;
+  recognitionState.selectedMatch = match;
+  setRecognitionMapMarker(match.lat, match.lng, `${match.markerName} • ${match.score}%`);
+  renderRecognitionMatches();
+};
+
+window.focusRecognitionMatchById = function (markerId) {
+  const match = recognitionState.currentMatches.find((entry) => entry.markerId === markerId);
+  if (!match) return;
+  recognitionState.selectedMatch = match;
+  setRecognitionMapMarker(match.lat, match.lng, `${match.markerName} • ${match.score}%`);
+  renderRecognitionMatches();
 };
 
 window.focusReference = function (markerId, lat, lng) {
@@ -1788,10 +1300,7 @@ window.focusReference = function (markerId, lat, lng) {
     focusMarkerById(markerId, true);
     return;
   }
-
-  if (Number.isFinite(lat) && Number.isFinite(lng)) {
-    setRecognitionMapMarker(lat, lng, "Referenz");
-  }
+  setRecognitionMapMarker(lat, lng, "Referenz");
 };
 
 window.deleteReference = async function (referenceId) {
@@ -1799,11 +1308,11 @@ window.deleteReference = async function (referenceId) {
   if (!confirm("Referenz wirklich löschen?")) return;
 
   try {
-    const res = await fetch(`/api/image-intelligence/references/${encodeURIComponent(referenceId)}`, {
+    const response = await fetch(`/api/image-intelligence/references/${encodeURIComponent(referenceId)}`, {
       method: "DELETE"
     });
-    const data = await res.json();
-    if (!res.ok || data.success === false) {
+    const data = await response.json();
+    if (!response.ok || data.success === false) {
       throw new Error(data.error || "Referenz konnte nicht gelöscht werden.");
     }
 
@@ -1816,43 +1325,62 @@ window.deleteReference = async function (referenceId) {
   }
 };
 
+function prepareNewMarkerFromRecognition(match, imageUrl = "") {
+  clearForm();
+  document.getElementById("markerName").value = match.markerName || "Neuer Marker";
+  document.getElementById("markerLat").value = roundCoord(match.lat || 0);
+  document.getElementById("markerLng").value = roundCoord(match.lng || 0);
+  document.getElementById("markerImage").value = imageUrl || "";
+  document.getElementById("markerOwner").value = currentUser.username || "";
+  switchToTab("editor");
+  updateRadiusFieldVisibility();
+}
+
 async function confirmRecognitionSelection() {
   if (!isAdmin()) return;
-  if (!recognitionState.currentUpload || !recognitionState.selectedMatch) return;
 
-  const lat = Number(document.getElementById("markerLat").value);
-  const lng = Number(document.getElementById("markerLng").value);
-
-  const res = await fetch("/api/image-intelligence/confirm", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      uploadId: recognitionState.currentUpload.uploadId,
-      markerId: recognitionState.selectedMatch.markerId,
-      lat,
-      lng,
-      status: recognitionState.manualPlacementMode ? "manuell korrigiert" : "bestätigt",
-      notes: recognitionState.manualPlacementMode ? "Position wurde manuell auf der Karte gesetzt." : "Treffer wurde übernommen."
-    })
-  });
-
-  const data = await res.json();
-  if (!res.ok || data.success === false) {
-    throw new Error(data.error || "Treffer konnte nicht bestätigt werden.");
+  const selected = recognitionState.selectedMatch;
+  const upload = recognitionState.currentUpload;
+  if (!selected || !upload) {
+    showMessage("Kein Treffer ausgewählt.", "error");
+    return;
   }
 
-  recognitionState.currentUpload = null;
-  recognitionState.currentMatches = [];
-  recognitionState.selectedMatch = null;
-  recognitionState.manualPlacementMode = false;
-  clearRecognitionMarker();
+  try {
+    const response = await fetch("/api/image-intelligence/confirm", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        uploadId: upload.uploadId,
+        markerId: selected.markerId,
+        lat: selected.lat,
+        lng: selected.lng,
+        status: recognitionState.manualPlacementMode ? "manuell korrigiert" : "bestätigt",
+        notes: recognitionState.manualPlacementMode ? "Manuell auf Karte gesetzt" : "Treffer bestätigt"
+      })
+    });
 
-  await refreshRecognitionUploads();
-  await refreshRecognitionReferences();
-  await refreshRecognitionOverview();
-  renderRecognitionSection();
+    const data = await response.json();
+    if (!response.ok || data.success === false) {
+      throw new Error(data.error || "Treffer konnte nicht bestätigt werden.");
+    }
+
+    recognitionState.currentUpload = null;
+    recognitionState.currentMatches = [];
+    recognitionState.selectedMatch = null;
+    recognitionState.manualPlacementMode = false;
+    clearRecognitionMarker();
+
+    await refreshRecognitionUploads();
+    await refreshRecognitionReferences();
+    await refreshRecognitionOverview();
+    renderRecognitionSection();
+  } catch (error) {
+    console.error(error);
+    showMessage(error.message || "Treffer konnte nicht bestätigt werden.", "error");
+  }
 }
 
 async function rejectCurrentRecognitionUpload() {
@@ -1983,7 +1511,7 @@ document.getElementById("exportVisibleBtn")?.addEventListener("click", () => {
     return;
   }
 
-  downloadJson("markers-visible.json", getVisibleMarkers());
+  downloadJsonFile("markers-visible.json", getVisibleMarkers().map(markerToPayload));
   showMessage("Sichtbare Marker exportiert.");
 });
 
@@ -2138,6 +1666,69 @@ document.addEventListener("keydown", (event) => {
     recognitionState.manualPlacementMode = false;
   }
 });
+
+function startLiveSync() {
+  if (liveSyncSource) {
+    liveSyncSource.close();
+  }
+
+  updateSyncStatus("connecting", "Verbinde...");
+  liveSyncSource = new EventSource("/api/live");
+
+  liveSyncSource.addEventListener("connected", () => {
+    updateSyncStatus("online", "Live-Sync");
+  });
+
+  liveSyncSource.addEventListener("markers-updated", async (event) => {
+    lastSyncMessageAt = new Date().toISOString();
+    updateSyncStatus("online", "Live-Sync");
+
+    try {
+      const payload = JSON.parse(event.data || "{}");
+      await loadMarkers();
+      if (canViewDashboard()) await fetchDashboard();
+      if (isAdmin()) {
+        await refreshRecognitionUploads();
+        await refreshRecognitionReferences(recognitionState.referenceType || "map");
+        await refreshRecognitionOverview();
+      }
+      if (payload.actor) {
+        showMessage(`Live-Update von ${payload.actor}`);
+      }
+    } catch (error) {
+      console.error(error);
+    }
+  });
+
+  liveSyncSource.addEventListener("backup-created", async () => {
+    lastSyncMessageAt = new Date().toISOString();
+    updateSyncStatus("online", "Live-Sync");
+    if (canViewDashboard()) await fetchDashboard();
+  });
+
+  liveSyncSource.onerror = () => {
+    updateSyncStatus("offline", "Neu verbinden...");
+  };
+}
+
+window.openImageModal = function (src) {
+  if (!src) return;
+  const modal = document.getElementById("imageModal");
+  const img = document.getElementById("imageModalImage");
+  if (!modal || !img) return;
+
+  img.src = src;
+  modal.classList.remove("hidden");
+};
+
+window.closeImageModal = function () {
+  const modal = document.getElementById("imageModal");
+  const img = document.getElementById("imageModalImage");
+  if (!modal || !img) return;
+
+  modal.classList.add("hidden");
+  img.src = "";
+};
 
 (async function init() {
   await fetchUser();
