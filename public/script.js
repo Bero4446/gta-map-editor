@@ -1,3 +1,41 @@
+app.get("/auth/discord", (req, res, next) => {
+  console.log("Discord Login gestartet");
+  console.log("CLIENT_ID gesetzt:", !!process.env.DISCORD_CLIENT_ID);
+  console.log("CLIENT_SECRET gesetzt:", !!process.env.DISCORD_CLIENT_SECRET);
+  console.log("REDIRECT_URI:", process.env.DISCORD_REDIRECT_URI || "FEHLT");
+  console.log("GUILD_ID gesetzt:", !!process.env.DISCORD_GUILD_ID);
+  console.log("BOT_TOKEN gesetzt:", !!process.env.DISCORD_BOT_TOKEN);
+
+  return passport.authenticate("discord")(req, res, next);
+});
+
+app.get("/auth/discord/callback", (req, res, next) => {
+  passport.authenticate("discord", (err, user, info) => {
+    console.log("DISCORD CALLBACK QUERY:", req.query);
+    console.log("DISCORD CALLBACK ERR:", err ? err.message || err : null);
+    console.log("DISCORD CALLBACK INFO:", info || null);
+
+    if (err) {
+      console.error("OAuth Fehler:", err.response?.data || err.message || err);
+      return res.status(500).send(`Discord OAuth Fehler: ${err.message || err}`);
+    }
+
+    if (!user) {
+      console.error("Kein User von Discord zurückbekommen:", info);
+      return res.status(401).send("Discord Login fehlgeschlagen.");
+    }
+
+    req.logIn(user, (loginErr) => {
+      if (loginErr) {
+        console.error("Session Login Fehler:", loginErr);
+        return res.status(500).send(`Session Fehler: ${loginErr.message || loginErr}`);
+      }
+
+      console.log("Discord Login erfolgreich:", user.username || user.id);
+      return res.redirect("/");
+    });
+  })(req, res, next);
+});
 const MAP_SIZE = 8192;
 const BOUNDS = [[0, 0], [MAP_SIZE, MAP_SIZE]];
 const MAP_IMAGE_CANDIDATES = [
