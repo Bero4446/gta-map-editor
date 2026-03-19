@@ -20,7 +20,18 @@ try {
   sendMapUpdatesPost = botModule.sendMapUpdatesPost || sendMapUpdatesPost;
   sendProjectUpdate = botModule.sendProjectUpdate || sendProjectUpdate;
 } catch (error) {
-  console.warn("bot.js konnte nicht geladen werden:", error.message);
+  console.error("DISCORD CALLBACK ERR:", error.message || error);
+  console.error("DISCORD CALLBACK DATA:", error.response?.data || null);
+  console.error("DISCORD CALLBACK HEADERS:", error.response?.headers || null);
+
+  return res.status(500).send(
+    `Discord OAuth Fehler: ${
+      error.response?.data?.error_description ||
+      error.response?.data?.error ||
+      error.message ||
+      "Unbekannt"
+    }`
+  );
 }
 
 const app = express();
