@@ -1,8 +1,80 @@
-const MAP_IMAGE = "GTAV-HD-MAP-satellite.jpeg";
 const MAP_SIZE = 8192;
 const BOUNDS = [[0, 0], [MAP_SIZE, MAP_SIZE]];
+const MAP_IMAGE_CANDIDATES = [
+  "GTAV-HD-MAP-satellite.jpg",
+  "GTAV-HD-MAP-satellite.jpeg",
+  "/GTAV-HD-MAP-satellite.jpg",
+  "/GTAV-HD-MAP-satellite.jpeg"
+];
 
 const CATEGORY_META = {
+  Dealer: { icon: "💊", statId: "statDealer", label: "Dealer" },
+  UG: { icon: "🔫", statId: "statUG", label: "UG" },
+  Feld: { icon: "🌿", statId: "statField", label: "Felder" },
+  Workstation: { icon: "🖥️", statId: "statWorkstation", label: "Workstations" },
+  Schwarzmarkt: { icon: "🕶", statId: "statVip", label: "Schwarzmarkt", vipOnly: true },
+  "Fraktions Krankenhaus": { icon: "🏥", statId: "statHospital", label: "Fraktions Krankenhaus" },
+  Systempunkteshop: { icon: "🛒", statId: "statPointShop", label: "Systempunkteshop" },
+  Fraktion: { icon: "🛡️", statId: "statFaction", label: "Fraktion" },
+  Fraktionsgebiet: { icon: "🗺️", statId: "statTerritory", label: "Fraktionsgebiete", territory: true }
+};
+
+const RECOGNITION_STATUS_LABELS = {
+  "neu": "Neu",
+  "automatisch erkannt": "Automatisch erkannt",
+  "manuell korrigiert": "Manuell korrigiert",
+  "bestätigt": "Bestätigt",
+  "abgelehnt": "Abgelehnt"
+};
+
+const map = L.map("map", {
+  crs: L.CRS.Simple,
+  minZoom: -4,
+  maxZoom: 1,
+  zoomSnap: 0.25,
+  wheelPxPerZoomLevel: 120,
+  maxBounds: BOUNDS,
+  maxBoundsViscosity: 1.0
+});
+
+let activeMapOverlay = null;
+
+function tryLoadImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(src);
+    img.onerror = () => reject(new Error(`Bild nicht gefunden: ${src}`));
+    img.src = src;
+  });
+}
+
+async function loadMapImage() {
+  for (const candidate of MAP_IMAGE_CANDIDATES) {
+    try {
+      const foundSrc = await tryLoadImage(candidate);
+      activeMapOverlay = L.imageOverlay(foundSrc, BOUNDS).addTo(map);
+      map.fitBounds(BOUNDS);
+      map.setZoom(-2);
+      console.log("Map geladen:", foundSrc);
+      return;
+    } catch (error) {
+      console.warn(error.message);
+    }
+  }
+
+  console.error("Kein Kartenbild gefunden.");
+  const mapElement = document.getElementById("map");
+  if (mapElement) {
+    mapElement.innerHTML = `
+      <div style="padding:20px;color:white;background:#1f2937;height:100%;display:flex;align-items:center;justify-content:center;text-align:center;">
+        Kartenbild nicht gefunden.<br>
+        Lege die Datei als <b>GTAV-HD-MAP-satellite.jpg</b> oder <b>GTAV-HD-MAP-satellite.jpeg</b> in den Ordner <b>public</b>.
+      </div>
+    `;
+  }
+}
+
+loadMapImage();
   Dealer: { icon: "💊", statId: "statDealer", label: "Dealer" },
   UG: { icon: "🔫", statId: "statUG", label: "UG" },
   Feld: { icon: "🌿", statId: "statField", label: "Felder" },
