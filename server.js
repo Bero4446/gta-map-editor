@@ -1,4 +1,4 @@
-require('./bot');
+const { sendDevlogPost, sendMapUpdatesPost, sendProjectUpdate } = require('./bot');
 const express = require("express");
 const fs = require("fs");
 const path = require("path");
@@ -17,6 +17,9 @@ const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, "public");
 const MARKERS_FILE = path.join(__dirname, "markers.json");
 const BACKUP_DIR = path.join(__dirname, "backups");
+const AI_UPLOADS_DIR = path.join(__dirname, "ai-uploads");
+const AI_DATA_DIR = path.join(__dirname, "ai-data");
+const DEVLOG_API_KEY = process.env.DEVLOG_API_KEY || "";
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL || "";
 const DATABASE_URL = process.env.DATABASE_URL;
 const AUTO_BACKUP_INTERVAL_MINUTES = Math.max(15, Number(process.env.AUTO_BACKUP_INTERVAL_MINUTES || 360));
@@ -38,6 +41,14 @@ if (!fs.existsSync(PUBLIC_DIR)) {
 
 if (!fs.existsSync(BACKUP_DIR)) {
   fs.mkdirSync(BACKUP_DIR, { recursive: true });
+}
+
+if (!fs.existsSync(AI_UPLOADS_DIR)) {
+  fs.mkdirSync(AI_UPLOADS_DIR, { recursive: true });
+}
+
+if (!fs.existsSync(AI_DATA_DIR)) {
+  fs.mkdirSync(AI_DATA_DIR, { recursive: true });
 }
 
 if (!DATABASE_URL) {
@@ -337,7 +348,8 @@ function buildHistorySummary(action, marker, changes) {
   return `Marker geändert: ${changes.map((change) => `${change.label}: ${formatValue(change.before)} → ${formatValue(change.after)}`).join(" | ")}`;
 }
 
-function buildDiscordLog(action, marker, adminName, changes) {  const base = [
+function buildDiscordLog(action, marker, adminName, changes) {
+  const base = [
     `**Marker:** ${marker.name}`,
     `**Kategorie:** ${marker.category}`,
     `**Besitzer:** ${marker.owner || "-"}`,
@@ -493,9 +505,7 @@ async function insertMarker(client, marker) {
       marker.updatedAt || null
     ]
   );
-}
-
-async function upsertMarker(client, marker) {
+}async function upsertMarker(client, marker) {
   await client.query(
     `
       INSERT INTO markers (
@@ -676,7 +686,8 @@ function scheduleAutomaticBackups() {
 async function getDashboardData() {
   const allMarkers = await loadMarkers();
   const historyResult = await pool.query(
-    `      SELECT history_id, marker_id, action, admin_name, marker_name, change_summary, created_at
+    `
+      SELECT history_id, marker_id, action, admin_name, marker_name, change_summary, created_at
       FROM marker_history
       ORDER BY created_at DESC, history_id DESC
       LIMIT 8
@@ -985,12 +996,8 @@ app.post("/markers", requireEditor, async (req, res) => {
         adminId,
         markerName: marker.name,
         changeSummary: summary,
-        changes: [],
-        snapshot: marker
       });
-    }
-
-    for (const entry of changed) {
+    }    for (const entry of changed) {
       const summary = buildHistorySummary("updated", entry.marker, entry.changes);
       await insertHistory(client, {
         markerId: entry.marker.id,
@@ -1015,7 +1022,8 @@ app.post("/markers", requireEditor, async (req, res) => {
         changeSummary: summary,
         changes: [],
         snapshot: marker
-      });    }
+      });
+    }
 
     await client.query("COMMIT");
 
@@ -1339,9 +1347,626 @@ app.post("/upload", requireEditor, (req, res) => {
   });
 });
 
+function requireDevlogKey(req, res, next) {
+  if (!DEVLOG_API_KEY) return next();
+
+  const incomingKey = String(req.headers["x-devlog-key"] || req.body?.key || "").trim();
+  if (!incomingKey || incomingKey !== DEVLOG_API_KEY) {
+    return res.status(401).json({ success: false, error: "Ungültiger Devlog-Key." });
+  }
+
+  next();
+}
+
+function safeFileNamePart(value, fallback = "upload") {
+  return String(value || fallback)
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 40) || fallback;
+}
+
+function detectExtensionFromMime(mime = "") {
+  if (mime.includes("png")) return ".png";
+  if (mime.includes("webp")) return ".webp";
+  if (mime.includes("gif")) return ".gif";
+  return ".jpg";
+}
+
+async function ensureAiTables() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS image_detection_uploads (
+      upload_id BIGSERIAL PRIMARY KEY,
+      image_type TEXT NOT NULL DEFAULT 'map',
+      status TEXT NOT NULL DEFAULT 'neu',
+      file_name TEXT NOT NULL DEFAULT '',
+      mime_type TEXT NOT NULL DEFAULT '',
+      image_path TEXT NOT NULL DEFAULT '',
+      image_url TEXT NOT NULL DEFAULT '',
+      uploaded_by TEXT NOT NULL DEFAULT '',
+      uploaded_by_id TEXT NOT NULL DEFAULT '',
+      original_marker_id TEXT NOT NULL DEFAULT '',
+      suggested_marker_id TEXT NOT NULL DEFAULT '',
+      suggested_lat DOUBLE PRECISION,
+      suggested_lng DOUBLE PRECISION,
+      suggested_score DOUBLE PRECISION NOT NULL DEFAULT 0,
+      notes TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS image_detection_matches (
+      match_id BIGSERIAL PRIMARY KEY,
+      upload_id BIGINT NOT NULL REFERENCES image_detection_uploads(upload_id) ON DELETE CASCADE,
+      marker_id TEXT NOT NULL DEFAULT '',
+      marker_name TEXT NOT NULL DEFAULT '',
+      score DOUBLE PRECISION NOT NULL DEFAULT 0,
+      reason TEXT NOT NULL DEFAULT '',
+      rank_index INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS image_detection_references (
+      reference_id BIGSERIAL PRIMARY KEY,
+      marker_id TEXT NOT NULL DEFAULT '',
+      marker_name TEXT NOT NULL DEFAULT '',
+      image_type TEXT NOT NULL DEFAULT 'map',
+      status TEXT NOT NULL DEFAULT 'bestätigt',
+      file_name TEXT NOT NULL DEFAULT '',
+      mime_type TEXT NOT NULL DEFAULT '',
+      image_path TEXT NOT NULL DEFAULT '',
+      image_url TEXT NOT NULL DEFAULT '',
+      created_from_upload_id BIGINT,
+      linked_history_id BIGINT,
+      created_by TEXT NOT NULL DEFAULT '',
+      created_by_id TEXT NOT NULL DEFAULT '',
+      lat DOUBLE PRECISION,
+      lng DOUBLE PRECISION,
+      notes TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_image_detection_uploads_created_at ON image_detection_uploads(created_at DESC)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_image_detection_uploads_status ON image_detection_uploads(status)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_image_detection_references_marker_id ON image_detection_references(marker_id)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_image_detection_references_image_type ON image_detection_references(image_type)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_image_detection_matches_upload_id ON image_detection_matches(upload_id)`);
+}
+
+function buildAiImageUrl(relativePath) {
+  return relativePath ? `/ai-uploads/${relativePath}` : "";
+}
+
+function scoreReferenceCandidate({ uploadType, marker, reference, index }) {
+  let score = 42;
+  const reasons = [];
+
+  if (String(reference.image_type || "") === String(uploadType || "")) {
+    score += 18;
+    reasons.push("Bildtyp passt");
+  }
+
+  if (reference.marker_id && marker.id === reference.marker_id) {
+    score += 20;
+    reasons.push("gleicher Marker wie vorhandene Referenz");
+  }
+
+  if (marker.favorite) {
+    score += 6;
+    reasons.push("Marker ist Favorit");
+  }
+
+  if (marker.category === "Schwarzmarkt" && uploadType === "ingame") {
+    score += 8;
+    reasons.push("Ingame-Bild passt gut zu Schwarzmarkt-Suche");
+  }
+
+  if (marker.category === "Fraktionsgebiet" && uploadType === "map") {
+    score += 10;
+    reasons.push("Kartenbild passt gut zu Gebietserkennung");
+  }
+
+  score = Math.max(1, Math.min(99, score - index * 4));
+  return { score, reason: reasons.join(" • ") || "Basis-Vorschlag" };
+}
+
+async function buildDetectionMatches(uploadId, uploadType) {
+  const markers = await loadMarkers();
+  const referenceResult = await pool.query(
+    `
+      SELECT reference_id, marker_id, marker_name, image_type, status, file_name, image_path, image_url, lat, lng, created_at
+      FROM image_detection_references
+      WHERE status <> 'abgelehnt'
+      ORDER BY updated_at DESC, reference_id DESC
+      LIMIT 500
+    `
+  );
+
+  const references = referenceResult.rows;
+  const ranked = [];  for (const [index, marker] of markers.entries()) {
+    const markerRefs = references.filter((ref) => ref.marker_id === marker.id);
+    const reference = markerRefs[0] || { image_type: uploadType, marker_id: marker.id };
+    const { score, reason } = scoreReferenceCandidate({ uploadType, marker, reference, index });
+    ranked.push({
+      markerId: marker.id,
+      markerName: marker.name,
+      lat: Number(marker.lat),
+      lng: Number(marker.lng),
+      score,
+      reason,
+      category: marker.category,
+      referenceCount: markerRefs.length
+    });
+  }
+
+  ranked.sort((a, b) => b.score - a.score || a.markerName.localeCompare(b.markerName, 'de'));
+  const top = ranked.slice(0, 3);
+
+  await pool.query(`DELETE FROM image_detection_matches WHERE upload_id = $1`, [uploadId]);
+
+  for (const [rankIndex, match] of top.entries()) {
+    await pool.query(
+      `
+        INSERT INTO image_detection_matches (upload_id, marker_id, marker_name, score, reason, rank_index)
+        VALUES ($1, $2, $3, $4, $5, $6)
+      `,
+      [uploadId, match.markerId, match.markerName, match.score, match.reason, rankIndex + 1]
+    );
+  }
+
+  return top;
+}
+
+async function getUploadMatches(uploadId) {
+  const result = await pool.query(
+    `
+      SELECT match_id, upload_id, marker_id, marker_name, score, reason, rank_index, created_at
+      FROM image_detection_matches
+      WHERE upload_id = $1
+      ORDER BY rank_index ASC, score DESC
+    `,
+    [uploadId]
+  );
+
+  return result.rows.map((row) => ({
+    matchId: Number(row.match_id),
+    uploadId: Number(row.upload_id),
+    markerId: String(row.marker_id || ""),
+    markerName: String(row.marker_name || ""),
+    score: Number(row.score || 0),
+    reason: String(row.reason || ""),
+    rankIndex: Number(row.rank_index || 0),
+    createdAt: row.created_at ? new Date(row.created_at).toISOString() : null
+  }));
+}
+
+async function getDetectionUploadById(uploadId) {
+  const result = await pool.query(
+    `
+      SELECT upload_id, image_type, status, file_name, mime_type, image_path, image_url, uploaded_by, uploaded_by_id,
+             original_marker_id, suggested_marker_id, suggested_lat, suggested_lng, suggested_score, notes, created_at, updated_at
+      FROM image_detection_uploads
+      WHERE upload_id = $1
+      LIMIT 1
+    `,
+    [uploadId]
+  );
+
+  if (!result.rowCount) return null;
+  const row = result.rows[0];
+  return {
+    uploadId: Number(row.upload_id),
+    imageType: String(row.image_type || "map"),
+    status: String(row.status || "neu"),
+    fileName: String(row.file_name || ""),
+    mimeType: String(row.mime_type || ""),
+    imagePath: String(row.image_path || ""),
+    imageUrl: String(row.image_url || ""),
+    uploadedBy: String(row.uploaded_by || ""),
+    uploadedById: String(row.uploaded_by_id || ""),
+    originalMarkerId: String(row.original_marker_id || ""),
+    suggestedMarkerId: String(row.suggested_marker_id || ""),
+    suggestedLat: row.suggested_lat === null ? null : Number(row.suggested_lat),
+    suggestedLng: row.suggested_lng === null ? null : Number(row.suggested_lng),
+    suggestedScore: Number(row.suggested_score || 0),
+    notes: String(row.notes || ""),
+    createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
+    updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : null
+  };
+}
+
+app.use('/ai-uploads', express.static(AI_UPLOADS_DIR));
+
+app.post('/api/devlog/manual', requireAdmin, async (req, res) => {
+  try {
+    const data = {
+      title: req.body?.title || 'LSV-Map System-Update live',
+      description: req.body?.description || 'Es wurde ein neues Update veröffentlicht.',
+      area: req.body?.area || 'Website',
+      branch: req.body?.branch || 'main',
+      author: req.user?.username || 'Admin',
+      commit: req.body?.commit || 'Manueller Devlog-Post',
+      commitId: req.body?.commitId || '-',
+      features: Array.isArray(req.body?.features) ? req.body.features : normalizeLines(req.body?.features || ''),
+      deployStatus: req.body?.deployStatus || 'Erfolgreich',
+      imageUrl: req.body?.imageUrl || ''
+    };
+
+    await sendProjectUpdate(data);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Devlog Fehler:', error.message);
+    res.status(500).json({ success: false, error: 'Devlog konnte nicht gesendet werden.' });
+  }
+});
+
+app.post('/api/devlog/github', requireDevlogKey, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const refName = String(body.ref || '').split('/').pop() || 'main';
+
+    if (refName !== 'main') {
+      return res.json({ success: true, skipped: true, reason: 'Nur main wird gepostet.' });
+    }
+
+    const commits = Array.isArray(body.commits) ? body.commits : [];
+    const features = commits.map((commit) => String(commit.message || '').trim()).filter(Boolean).slice(0, 6);
+    const head = commits[commits.length - 1] || {};
+
+    await sendDevlogPost({
+      title: 'LSV-Map GitHub-Update',
+      description: body.head_commit?.message || head.message || 'Neue Änderungen wurden auf main gepusht.',
+      area: 'GitHub',
+      branch: refName,
+      author: body.pusher?.name || head.author?.name || 'Unbekannt',
+      commit: body.head_commit?.message || head.message || 'Push auf main',
+      commitId: String(body.after || '').slice(0, 7) || '-',
+      features,
+      deployStatus: 'Ausstehend',
+      url: body.compare || body.repository?.html_url || ''
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('GitHub Devlog Fehler:', error.message);
+    res.status(500).json({ success: false, error: 'GitHub Devlog fehlgeschlagen.' });
+  }
+});
+
+app.post('/api/devlog/deploy', requireDevlogKey, async (req, res) => {
+  try {
+    const body = req.body || {};
+
+    await sendProjectUpdate({
+      title: body.title || 'LSV-Map Deploy Status',
+      description: body.description || 'Ein neuer Deploy-Status wurde gemeldet.',
+      shortDescription: body.shortDescription || body.description || 'Neues Update live.',
+      area: body.area || 'Deploy',
+      branch: body.branch || 'main',
+      author: body.author || 'System',
+      commit: body.commit || 'Deploy-Update',
+      commitId: body.commitId || '-',
+      features: Array.isArray(body.features) ? body.features : normalizeLines(body.features || ''),
+      deployStatus: body.deployStatus || 'Erfolgreich',
+      imageUrl: body.imageUrl || ''
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Deploy Devlog Fehler:', error.message);
+    res.status(500).json({ success: false, error: 'Deploy-Devlog fehlgeschlagen.' });
+  }
+});
+
+app.get('/api/image-intelligence/overview', requireAdmin, async (req, res) => {
+  try {
+    const [uploadsResult, referencesResult] = await Promise.all([
+      pool.query(`SELECT COUNT(*)::int AS count FROM image_detection_uploads`),
+      pool.query(`SELECT COUNT(*)::int AS count FROM image_detection_references`)
+    ]);
+
+    const statusResult = await pool.query(`
+      SELECT status, COUNT(*)::int AS count
+      FROM image_detection_uploads
+      GROUP BY status
+      ORDER BY status ASC
+    `);
+
+    res.json({
+      success: true,
+      totalUploads: Number(uploadsResult.rows[0]?.count || 0),
+      totalReferences: Number(referencesResult.rows[0]?.count || 0),
+      statusBreakdown: statusResult.rows.map((row) => ({ status: row.status, count: Number(row.count || 0) }))
+    });
+  } catch (error) {
+    console.error('Image-Overview Fehler:', error.message);
+    res.status(500).json({ success: false, error: 'Übersicht konnte nicht geladen werden.' });
+  }
+});
+
+app.get('/api/image-intelligence/uploads', requireAdmin, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT upload_id, image_type, status, file_name, mime_type, image_path, image_url, uploaded_by, uploaded_by_id,
+             original_marker_id, suggested_marker_id, suggested_lat, suggested_lng, suggested_score, notes, created_at, updated_at
+      FROM image_detection_uploads
+      ORDER BY created_at DESC, upload_id DESC
+      LIMIT 100
+    `);
+
+    const uploads = [];
+    for (const row of result.rows) {
+      const matches = await getUploadMatches(row.upload_id);
+      uploads.push({
+        uploadId: Number(row.upload_id),
+        imageType: String(row.image_type || 'map'),
+        status: String(row.status || 'neu'),
+        fileName: String(row.file_name || ''),
+        mimeType: String(row.mime_type || ''),
+        imagePath: String(row.image_path || ''),
+        imageUrl: String(row.image_url || ''),
+        uploadedBy: String(row.uploaded_by || ''),
+        uploadedById: String(row.uploaded_by_id || ''),
+        originalMarkerId: String(row.original_marker_id || ''),
+        suggestedMarkerId: String(row.suggested_marker_id || ''),
+        suggestedLat: row.suggested_lat === null ? null : Number(row.suggested_lat),
+        suggestedLng: row.suggested_lng === null ? null : Number(row.suggested_lng),
+        suggestedScore: Number(row.suggested_score || 0),
+        notes: String(row.notes || ''),
+        createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
+        updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : null,
+        matches
+      });
+    }
+
+    res.json({ success: true, uploads });
+  } catch (error) {
+    console.error('Image-Uploads Fehler:', error.message);
+    res.status(500).json({ success: false, error: 'Uploads konnten nicht geladen werden.' });
+  }
+});
+
+app.get('/api/image-intelligence/references', requireAdmin, async (req, res) => {
+  try {
+    const imageType = String(req.query.type || '').trim();
+    const values = [];
+    let whereSql = '';
+
+    if (imageType) {
+      values.push(imageType);
+      whereSql = `WHERE image_type = $${values.length}`;
+    }
+
+    const result = await pool.query(`
+      SELECT reference_id, marker_id, marker_name, image_type, status, file_name, mime_type, image_path, image_url,
+             created_from_upload_id, linked_history_id, created_by, created_by_id, lat, lng, notes, created_at, updated_at
+      FROM image_detection_references
+      ${whereSql}
+      ORDER BY created_at DESC, reference_id DESC
+      LIMIT 200
+    `, values);
+
+    const references = result.rows.map((row) => ({
+      referenceId: Number(row.reference_id),
+      markerId: String(row.marker_id || ''),
+      markerName: String(row.marker_name || ''),
+      imageType: String(row.image_type || 'map'),
+      status: String(row.status || 'bestätigt'),
+      fileName: String(row.file_name || ''),
+      mimeType: String(row.mime_type || ''),
+      imagePath: String(row.image_path || ''),
+      imageUrl: String(row.image_url || ''),
+      createdFromUploadId: row.created_from_upload_id === null ? null : Number(row.created_from_upload_id),
+      linkedHistoryId: row.linked_history_id === null ? null : Number(row.linked_history_id),
+      createdBy: String(row.created_by || ''),
+      createdById: String(row.created_by_id || ''),
+      lat: row.lat === null ? null : Number(row.lat),
+      lng: row.lng === null ? null : Number(row.lng),
+      notes: String(row.notes || ''),
+      createdAt: row.created_at ? new Date(row.created_at).toISOString() : null,
+      updatedAt: row.updated_at ? new Date(row.updated_at).toISOString() : null
+    }));
+
+    res.json({ success: true, references });
+  } catch (error) {
+    console.error('Image-References Fehler:', error.message);
+    res.status(500).json({ success: false, error: 'Referenzen konnten nicht geladen werden.' });
+  }
+});
+
+app.post('/api/image-intelligence/upload', requireAdmin, (req, res) => {
+  upload.single('file')(req, res, async (error) => {
+    if (error) {
+      return res.status(400).json({ success: false, error: error.message || 'Upload fehlgeschlagen.' });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: 'Keine Datei hochgeladen.' });
+    }
+
+    try {
+      const imageType = String(req.body?.imageType || 'map').trim().toLowerCase() === 'ingame' ? 'ingame' : 'map';
+      const ext = detectExtensionFromMime(req.file.mimetype);
+      const fileName = `${Date.now()}-${safeFileNamePart(req.file.originalname || imageType)}${ext}`;
+      const relativePath = fileName;
+      const fullPath = path.join(AI_UPLOADS_DIR, relativePath);
+      fs.writeFileSync(fullPath, req.file.buffer);
+
+      const imageUrl = buildAiImageUrl(relativePath);
+
+      const insertResult = await pool.query(
+        `
+          INSERT INTO image_detection_uploads (
+            image_type, status, file_name, mime_type, image_path, image_url, uploaded_by, uploaded_by_id, notes, updated_at
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+          RETURNING upload_id
+        `,
+        [
+          imageType,
+          'neu',
+          req.file.originalname || fileName,
+          req.file.mimetype || 'image/jpeg',
+          relativePath,
+          imageUrl,
+          req.user?.username || 'Admin',
+          req.user?.id || '',
+          ''
+        ]
+      );
+
+      const uploadId = Number(insertResult.rows[0].upload_id);
+      const matches = await buildDetectionMatches(uploadId, imageType);
+      const best = matches[0] || null;
+
+      await pool.query(
+        `
+          UPDATE image_detection_uploads
+          SET status = $2, suggested_marker_id = $3, suggested_lat = $4, suggested_lng = $5, suggested_score = $6, updated_at = NOW()
+          WHERE upload_id = $1
+        `,
+        [
+          uploadId,
+          best ? 'automatisch erkannt' : 'neu',
+          best?.markerId || '',
+          best?.lat ?? null,
+          best?.lng ?? null,
+          best?.score || 0
+        ]
+      );
+
+      const finalUpload = await getDetectionUploadById(uploadId);
+      const finalMatches = await getUploadMatches(uploadId);
+
+      res.json({
+        success: true,
+        upload: finalUpload,
+        matches: finalMatches
+      });
+    } catch (innerError) {
+      console.error('Image-Upload Fehler:', innerError.message);
+      res.status(500).json({ success: false, error: 'Bild konnte nicht verarbeitet werden.' });
+    }
+  });
+});
+
+app.post('/api/image-intelligence/confirm', requireAdmin, async (req, res) => {
+  try {
+    const uploadId = Number(req.body?.uploadId);
+    const markerId = String(req.body?.markerId || '').trim();
+    const lat = Number(req.body?.lat);
+    const lng = Number(req.body?.lng);
+    const status = String(req.body?.status || 'bestätigt').trim() || 'bestätigt';
+    const notes = String(req.body?.notes || '').trim();
+
+    if (!Number.isFinite(uploadId)) {
+      return res.status(400).json({ success: false, error: 'Upload-ID fehlt.' });
+    }
+
+    if (!markerId) {
+      return res.status(400).json({ success: false, error: 'Marker-ID fehlt.' });
+    }
+
+    const uploadRow = await getDetectionUploadById(uploadId);
+    if (!uploadRow) {
+      return res.status(404).json({ success: false, error: 'Upload nicht gefunden.' });
+    }
+
+    const markers = await loadMarkers();
+    const marker = markers.find((entry) => entry.id === markerId);
+    if (!marker) {
+      return res.status(404).json({ success: false, error: 'Marker nicht gefunden.' });
+    }
+
+    const finalLat = Number.isFinite(lat) ? lat : Number(marker.lat);
+    const finalLng = Number.isFinite(lng) ? lng : Number(marker.lng);
+
+    await pool.query(
+      `
+        UPDATE image_detection_uploads
+        SET status = $2, original_marker_id = $3, suggested_marker_id = $3, suggested_lat = $4, suggested_lng = $5, notes = $6, updated_at = NOW()
+        WHERE upload_id = $1
+      `,
+      [uploadId, status, marker.id, finalLat, finalLng, notes]
+    );
+
+    await pool.query(
+      `
+        INSERT INTO image_detection_references (
+          marker_id, marker_name, image_type, status, file_name, mime_type, image_path, image_url, created_from_upload_id,
+          created_by, created_by_id, lat, lng, notes, updated_at
+        )
+        VALUES ($1, $2, $3, 'bestätigt', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+      `,
+      [
+        marker.id,
+        marker.name,
+        uploadRow.imageType,
+        uploadRow.fileName,
+        uploadRow.mimeType,
+        uploadRow.imagePath,
+        uploadRow.imageUrl,
+        uploadId,
+        req.user?.username || 'Admin',
+        req.user?.id || '',
+        finalLat,
+        finalLng,
+        notes
+      ]
+    );
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Image-Confirm Fehler:', error.message);
+    res.status(500).json({ success: false, error: 'Treffer konnte nicht bestätigt werden.' });
+  }
+});
+
+app.post('/api/image-intelligence/reject/:uploadId', requireAdmin, async (req, res) => {
+  try {
+    const uploadId = Number(req.params.uploadId);
+    if (!Number.isFinite(uploadId)) {
+      return res.status(400).json({ success: false, error: 'Ungültige Upload-ID.' });
+    }
+
+    await pool.query(
+      `UPDATE image_detection_uploads SET status = 'abgelehnt', updated_at = NOW() WHERE upload_id = $1`,
+      [uploadId]
+    );
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Image-Reject Fehler:', error.message);
+    res.status(500).json({ success: false, error: 'Upload konnte nicht abgelehnt werden.' });
+  }
+});
+
+app.delete('/api/image-intelligence/references/:referenceId', requireAdmin, async (req, res) => {
+  try {
+    const referenceId = Number(req.params.referenceId);
+    if (!Number.isFinite(referenceId)) {
+      return res.status(400).json({ success: false, error: 'Ungültige Referenz-ID.' });
+    }
+
+    await pool.query(`DELETE FROM image_detection_references WHERE reference_id = $1`, [referenceId]);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Reference-Delete Fehler:', error.message);
+    res.status(500).json({ success: false, error: 'Referenz konnte nicht gelöscht werden.' });
+  }
+});
+
 async function startServer() {
   try {
     await createTables();
+    await ensureAiTables();
     await seedFromJsonIfDatabaseIsEmpty();
     scheduleAutomaticBackups();
 
