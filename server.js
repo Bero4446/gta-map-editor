@@ -1,16 +1,27 @@
 require("dotenv").config();
 
-const { sendDevlogPost, sendMapUpdatesPost, sendProjectUpdate } = require("./bot");
 const express = require("express");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const session = require("express-session");
 const passport = require("passport");
-const DiscordStrategy = require("passport-discord").Strategy;
 const axios = require("axios");
 const multer = require("multer");
 const { Pool } = require("pg");
+
+let sendDevlogPost = async () => {};
+let sendMapUpdatesPost = async () => {};
+let sendProjectUpdate = async () => {};
+
+try {
+  const botModule = require("./bot");
+  sendDevlogPost = botModule.sendDevlogPost || sendDevlogPost;
+  sendMapUpdatesPost = botModule.sendMapUpdatesPost || sendMapUpdatesPost;
+  sendProjectUpdate = botModule.sendProjectUpdate || sendProjectUpdate;
+} catch (error) {
+  console.warn("bot.js konnte nicht geladen werden:", error.message);
+}
 
 const app = express();
 app.set("trust proxy", 1);
@@ -24,6 +35,7 @@ const AI_DATA_DIR = path.join(__dirname, "ai-data");
 const AI_UPLOADS_JSON = path.join(AI_DATA_DIR, "uploads.json");
 const AI_REFERENCES_JSON = path.join(AI_DATA_DIR, "references.json");
 const HISTORY_FILE = path.join(AI_DATA_DIR, "marker-history.json");
+
 const DEVLOG_API_KEY = process.env.DEVLOG_API_KEY || "";
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL || "";
 const DATABASE_URL = String(process.env.DATABASE_URL || "").trim();
@@ -98,104 +110,12 @@ app.use(passport.session());
 passport.serializeUser((user, done) => done(null, user));
 passport.deserializeUser((obj, done) => done(null, obj));
 
-const discordClientId = process.env.DISCORD_CLIENT_ID || "";
-const discordClientSecret = process.env.DISCORD_CLIENT_SECRET || "";
-const discordRedirectUri = process.env.DISCORD_REDIRECT_URI || "";
-
-if (discordClientId && discordClientSecret && discordRedirectUri) {
-  passport.use(
-    new DiscordStrategy(
-      {
-        clientID: discordClientId,
-        clientSecret: discordClientSecret,
-        callbackURL: discordRedirectUri,
-        scope: ["identify"]
-      },
-      async (accessToken, refreshToken, profile, done) => {
-        try {
-          const guildId = process.env.DISCORD_GUILD_ID || "";
-          const vipRoleId = process.env.DISCORD_VIP_ROLE_ID || "";
-          const adminRoleId = process.env.DISCORD_ADMIN_ROLE_ID || "";
-          const supportRoleId =
-            process.env.DISCORD_SUPPORT_ROLE_ID || process.env.SUPPORT_PING_ROLE_ID || "";
-          const mapperRoleId = process.env.DISCORD_MAPPER_ROLE_ID || "";
-          const dashboardRoleId = process.env.DISCORD_DASHBOARD_ROLE_ID || "";
-
-          let isVip = false;
-          let isAdmin = false;
-          let isSupport = false;
-          let isMapper = false;
-          let canViewDashboard = false;
-          let canEdit = false;
-          let roleNames = [];
-
-          if (guildId && process.env.DISCORD_BOT_TOKEN) {
-            try {
-              const response = await axios.get(
-                `https://discord.com/api/guilds/${guildId}/members/${profile.id}`,
-                {
-                  headers: {
-                    Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN}`
-                  },
-                  timeout: 15000
-                }
-              );
-
-              const roles = Array.isArray(response.data?.roles) ? response.data.roles : [];
-
-              isVip = !!vipRoleId && roles.includes(vipRoleId);
-              isAdmin = !!adminRoleId && roles.includes(adminRoleId);
-              isSupport = !!supportRoleId && roles.includes(supportRoleId);
-              isMapper = !!mapperRoleId && roles.includes(mapperRoleId);
-
-              canEdit = isAdmin || isMapper;
-              canViewDashboard = isAdmin || isSupport || isMapper || (!!dashboardRoleId && roles.includes(dashboardRoleId));
-
-              roleNames = [
-                isAdmin ? "Admin" : null,
-                isMapper ? "Mapper" : null,
-                isSupport ? "Support" : null,
-                isVip ? "VIP" : null
-              ].filter(Boolean);
-            } catch (apiError) {
-              console.error(
-                "Discord Rollenabfrage Fehler:",
-                apiError.response?.data || apiError.message
-              );
-            }
-          }
-
-          const user = {
-            id: String(profile.id || ""),
-            username: profile.username || profile.global_name || "Discord User",
-            avatar: profile.avatar || "",
-            isVip,
-            isAdmin,
-            isSupport,
-            isMapper,
-            canEdit,
-            canViewDashboard,
-            roleNames
-          };
-
-          return done(null, user);
-        } catch (error) {
-          return done(error);
-        }
-      }
-    )
-  );
-} else {
-  console.warn("Discord OAuth ist nicht vollständig konfiguriert.");
-}
-
 function readJsonFile(file, fallback = []) {
   try {
     if (!fs.existsSync(file)) return fallback;
     const raw = fs.readFileSync(file, "utf8");
     if (!raw.trim()) return fallback;
-    const parsed = JSON.parse(raw);
-    return parsed;
+    return JSON.parse(raw);
   } catch (error) {
     console.error(`Fehler beim Lesen von ${path.basename(file)}:`, error.message);
     return fallback;
@@ -240,17 +160,17 @@ function getSafeBackupFilename(filename) {
   return path.basename(String(filename || "")).replace(/[^a-zA-Z0-9._-]/g, "");
 }
 
-function markerSummary(marker) {
-  return `${marker.name} (${marker.category}) @ ${Number(marker.lat).toFixed(2)}, ${Number(
-    marker.lng
-  ).toFixed(2)}`;
-}
-
 function formatValue(value) {
   if (value === null || value === undefined || value === "") return "-";
   if (typeof value === "boolean") return value ? "Ja" : "Nein";
   if (typeof value === "number") return Number.isFinite(value) ? String(value) : "-";
   return String(value);
+}
+
+function markerSummary(marker) {
+  return `${marker.name} (${marker.category}) @ ${Number(marker.lat).toFixed(2)}, ${Number(
+    marker.lng
+  ).toFixed(2)}`;
 }
 
 function normalizeMarker(input) {
@@ -382,7 +302,9 @@ function buildDiscordLog(action, marker, adminName, changes = []) {
   }
 
   const summary = changes.length
-    ? changes.map((change) => `${change.label}: ${formatValue(change.before)} → ${formatValue(change.after)}`).join(" | ")
+    ? changes
+        .map((change) => `${change.label}: ${formatValue(change.before)} → ${formatValue(change.after)}`)
+        .join(" | ")
     : "Keine Detailänderungen erkannt";
 
   return `🟡 **${adminName}** hat Marker geändert\n${base.join("\n")}\n**Änderungen:** ${summary}`;
@@ -583,7 +505,7 @@ async function loadMarkers() {
   return loadMarkersFromJson();
 }
 
-async function saveMarkers(finalMarkers, adminName, adminId) {
+async function saveMarkers(finalMarkers, adminName) {
   if (pool) {
     await pool.query("BEGIN");
     try {
@@ -739,6 +661,7 @@ async function getHistoryEntryById(historyId) {
 
 async function getDashboardData() {
   const allMarkers = await loadMarkers();
+
   const history = pool
     ? (
         await pool.query(`
@@ -771,7 +694,6 @@ async function getDashboardData() {
 
   for (const marker of allMarkers) {
     categoryCounts[marker.category] = (categoryCounts[marker.category] || 0) + 1;
-
     const owner = String(marker.owner || "Unzugewiesen").trim() || "Unzugewiesen";
     ownerCounts[owner] = (ownerCounts[owner] || 0) + 1;
   }
@@ -874,10 +796,9 @@ app.get("/api/auth-debug", (req, res) => {
   });
 });
 
-app.get("/auth/discord", (req, res, next) => {
-  if (!discordClientId || !discordClientSecret || !discordRedirectUri) {
-    return res.status(500).send("Discord OAuth ist nicht vollständig konfiguriert.");
-  }
+app.get("/auth/discord", (req, res) => {
+  const clientId = process.env.DISCORD_CLIENT_ID;
+  const redirectUri = process.env.DISCORD_REDIRECT_URI;
 
   console.log("Discord Login gestartet");
   console.log("CLIENT_ID gesetzt:", !!process.env.DISCORD_CLIENT_ID);
@@ -886,26 +807,126 @@ app.get("/auth/discord", (req, res, next) => {
   console.log("GUILD_ID gesetzt:", !!process.env.DISCORD_GUILD_ID);
   console.log("BOT_TOKEN gesetzt:", !!process.env.DISCORD_BOT_TOKEN);
 
-  return passport.authenticate("discord")(req, res, next);
+  if (!clientId || !redirectUri) {
+    return res.status(500).send("Discord OAuth ist nicht vollständig konfiguriert.");
+  }
+
+  const params = new URLSearchParams({
+    client_id: clientId,
+    response_type: "code",
+    redirect_uri: redirectUri,
+    scope: "identify"
+  });
+
+  return res.redirect(`https://discord.com/oauth2/authorize?${params.toString()}`);
 });
 
-app.get("/auth/discord/callback", (req, res, next) => {
-  passport.authenticate("discord", (err, user, info) => {
+app.get("/auth/discord/callback", async (req, res) => {
+  try {
     console.log("DISCORD CALLBACK QUERY:", req.query);
-    console.log("DISCORD CALLBACK ERR:", err ? err.message || err : null);
-    console.log("DISCORD CALLBACK INFO:", info || null);
 
-    if (err) {
-      console.error("OAuth Fehler:", err.response?.data || err.message || err);
-      return res.status(500).send(`Discord OAuth Fehler: ${err.message || err}`);
+    const code = String(req.query.code || "");
+    if (!code) {
+      return res.status(400).send("Discord OAuth Fehler: Kein Code erhalten.");
     }
 
-    if (!user) {
-      console.error("Kein User von Discord zurückbekommen:", info);
-      return res.status(401).send("Discord Login fehlgeschlagen.");
+    const tokenBody = new URLSearchParams({
+      client_id: process.env.DISCORD_CLIENT_ID || "",
+      client_secret: process.env.DISCORD_CLIENT_SECRET || "",
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: process.env.DISCORD_REDIRECT_URI || ""
+    });
+
+    const tokenResponse = await axios.post(
+      "https://discord.com/api/oauth2/token",
+      tokenBody.toString(),
+      {
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded"
+        },
+        timeout: 15000
+      }
+    );
+
+    const accessToken = tokenResponse.data?.access_token;
+    if (!accessToken) {
+      console.error("DISCORD CALLBACK ERR: Kein Access Token erhalten");
+      return res.status(500).send("Discord OAuth Fehler: Kein Access Token erhalten.");
     }
 
-    req.logIn(user, (loginErr) => {
+    const profileResponse = await axios.get("https://discord.com/api/users/@me", {
+      headers: {
+        Authorization: `Bearer ${accessToken}`
+      },
+      timeout: 15000
+    });
+
+    const profile = profileResponse.data || {};
+    const guildId = process.env.DISCORD_GUILD_ID || "";
+    const vipRoleId = process.env.DISCORD_VIP_ROLE_ID || "";
+    const adminRoleId = process.env.DISCORD_ADMIN_ROLE_ID || "";
+    const supportRoleId =
+      process.env.DISCORD_SUPPORT_ROLE_ID || process.env.SUPPORT_PING_ROLE_ID || "";
+    const mapperRoleId = process.env.DISCORD_MAPPER_ROLE_ID || "";
+    const dashboardRoleId = process.env.DISCORD_DASHBOARD_ROLE_ID || "";
+
+    let isVip = false;
+    let isAdmin = false;
+    let isSupport = false;
+    let isMapper = false;
+    let canViewDashboard = false;
+    let canEdit = false;
+    let roleNames = [];
+
+    if (guildId && process.env.DISCORD_BOT_TOKEN) {
+      try {
+        const memberResponse = await axios.get(
+          `https://discord.com/api/guilds/${guildId}/members/${profile.id}`,
+          {
+            headers: {
+              Authorization: `Bot ${process.env.DISCORD_BOT_TOKEN}`
+            },
+            timeout: 15000
+          }
+        );
+
+        const roles = Array.isArray(memberResponse.data?.roles) ? memberResponse.data.roles : [];
+
+        isVip = !!vipRoleId && roles.includes(vipRoleId);
+        isAdmin = !!adminRoleId && roles.includes(adminRoleId);
+        isSupport = !!supportRoleId && roles.includes(supportRoleId);
+        isMapper = !!mapperRoleId && roles.includes(mapperRoleId);
+
+        canEdit = isAdmin || isMapper;
+        canViewDashboard =
+          isAdmin || isSupport || isMapper || (!!dashboardRoleId && roles.includes(dashboardRoleId));
+
+        roleNames = [
+          isAdmin ? "Admin" : null,
+          isMapper ? "Mapper" : null,
+          isSupport ? "Support" : null,
+          isVip ? "VIP" : null
+        ].filter(Boolean);
+      } catch (memberError) {
+        console.error("Discord Rollenabfrage Fehler:", memberError.response?.data || memberError.message);
+      }
+    }
+
+    const user = {
+      id: String(profile.id || ""),
+      username: profile.username || profile.global_name || "Discord User",
+      avatar: profile.avatar || "",
+      isVip,
+      isAdmin,
+      isSupport,
+      isMapper,
+      canEdit,
+      canViewDashboard,
+      roleNames
+    };
+
+    req.login(user, (loginErr) => {
       if (loginErr) {
         console.error("Session Login Fehler:", loginErr);
         return res.status(500).send(`Session Fehler: ${loginErr.message || loginErr}`);
@@ -914,7 +935,20 @@ app.get("/auth/discord/callback", (req, res, next) => {
       console.log("Discord Login erfolgreich:", user.username || user.id);
       return res.redirect("/");
     });
-  })(req, res, next);
+  } catch (error) {
+    console.error("DISCORD CALLBACK ERR:", error.message || error);
+    console.error("DISCORD CALLBACK INFO:", error.response?.data || null);
+    console.error("OAuth Fehler:", error.response?.data || error.message || error);
+
+    return res.status(500).send(
+      `Discord OAuth Fehler: ${
+        error.response?.data?.error_description ||
+        error.response?.data?.error ||
+        error.message ||
+        "Unbekannt"
+      }`
+    );
+  }
 });
 
 app.get("/logout", (req, res) => {
@@ -1051,7 +1085,7 @@ app.post("/markers", requireEditor, async (req, res) => {
       await createBackupFile("before-save", adminName, oldMarkers);
     }
 
-    await saveMarkers(finalMarkers, adminName, adminId);
+    await saveMarkers(finalMarkers, adminName);
 
     for (const marker of added) {
       await addHistoryEntry({
@@ -1179,7 +1213,7 @@ app.post("/api/import-markers", requireAdmin, async (req, res) => {
       await createBackupFile("before-import", adminName, oldMarkers);
     }
 
-    await saveMarkers(cleanMarkers, adminName, adminId);
+    await saveMarkers(cleanMarkers, adminName);
 
     for (const marker of cleanMarkers) {
       await addHistoryEntry({
@@ -1194,7 +1228,9 @@ app.post("/api/import-markers", requireAdmin, async (req, res) => {
       });
     }
 
-    await sendDiscordLog(`📥 **${adminName}** hat einen Marker-Import ausgeführt.\n**Marker gesamt:** ${cleanMarkers.length}`);
+    await sendDiscordLog(
+      `📥 **${adminName}** hat einen Marker-Import ausgeführt.\n**Marker gesamt:** ${cleanMarkers.length}`
+    );
 
     broadcastLiveEvent("markers-updated", {
       actor: adminName,
@@ -1289,7 +1325,7 @@ app.post("/api/marker-history-entry/:historyId/restore", requireAdmin, async (re
     const finalMarkers = currentMarkersBeforeRestore.filter((marker) => marker.id !== restoredMarker.id);
     finalMarkers.push(restoredMarker);
 
-    await saveMarkers(finalMarkers, adminName, adminId);
+    await saveMarkers(finalMarkers, adminName);
     await addHistoryEntry({
       markerId: restoredMarker.id,
       action: "restored",
@@ -1450,7 +1486,7 @@ function writeAiReferences(entries) {
 }
 
 function getUploadMatches(upload) {
-  const markers = readJsonFile(MARKERS_FILE, []).map(normalizeMarker).filter(Boolean);
+  const markers = loadMarkersFromJson();
 
   return markers
     .map((marker, index) => {
@@ -1884,6 +1920,11 @@ async function startServer() {
       console.log(`Server läuft auf http://${host}:${PORT}`);
       console.log(`Öffentliche Dateien aus: ${PUBLIC_DIR}`);
       console.log(`Auto-Backups alle ${AUTO_BACKUP_INTERVAL_MINUTES} Minuten aktiv.`);
+    });
+
+    server.on("error_toggle", (error) => {
+      console.error("HTTP Server Fehler:", error);
+      process.exit(1);
     });
 
     server.on("error", (error) => {
