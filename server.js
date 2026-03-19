@@ -20,18 +20,7 @@ try {
   sendMapUpdatesPost = botModule.sendMapUpdatesPost || sendMapUpdatesPost;
   sendProjectUpdate = botModule.sendProjectUpdate || sendProjectUpdate;
 } catch (error) {
-  console.error("DISCORD CALLBACK ERR:", error.message || error);
-  console.error("DISCORD CALLBACK DATA:", error.response?.data || null);
-  console.error("DISCORD CALLBACK HEADERS:", error.response?.headers || null);
-
-  return res.status(500).send(
-    `Discord OAuth Fehler: ${
-      error.response?.data?.error_description ||
-      error.response?.data?.error ||
-      error.message ||
-      "Unbekannt"
-    }`
-  );
+  console.warn("bot.js konnte nicht geladen werden:", error.message);
 }
 
 const app = express();
@@ -510,9 +499,7 @@ async function seedFromJsonIfDatabaseIsEmpty() {
 }
 
 async function loadMarkers() {
-  if (pool) {
-    return loadMarkersFromDb();
-  }
+  if (pool) return loadMarkersFromDb();
   return loadMarkersFromJson();
 }
 
@@ -807,7 +794,17 @@ app.get("/api/auth-debug", (req, res) => {
   });
 });
 
+let lastDiscordLoginAttempt = 0;
+
 app.get("/auth/discord", (req, res) => {
+  const now = Date.now();
+
+  if (now - lastDiscordLoginAttempt < 10000) {
+    return res.status(429).send("Bitte kurz warten und dann erneut versuchen.");
+  }
+
+  lastDiscordLoginAttempt = now;
+
   const clientId = process.env.DISCORD_CLIENT_ID;
   const redirectUri = process.env.DISCORD_REDIRECT_URI;
 
@@ -948,7 +945,8 @@ app.get("/auth/discord/callback", async (req, res) => {
     });
   } catch (error) {
     console.error("DISCORD CALLBACK ERR:", error.message || error);
-    console.error("DISCORD CALLBACK INFO:", error.response?.data || null);
+    console.error("DISCORD CALLBACK DATA:", error.response?.data || null);
+    console.error("DISCORD CALLBACK HEADERS:", error.response?.headers || null);
     console.error("OAuth Fehler:", error.response?.data || error.message || error);
 
     return res.status(500).send(
@@ -1931,11 +1929,6 @@ async function startServer() {
       console.log(`Server läuft auf http://${host}:${PORT}`);
       console.log(`Öffentliche Dateien aus: ${PUBLIC_DIR}`);
       console.log(`Auto-Backups alle ${AUTO_BACKUP_INTERVAL_MINUTES} Minuten aktiv.`);
-    });
-
-    server.on("error_toggle", (error) => {
-      console.error("HTTP Server Fehler:", error);
-      process.exit(1);
     });
 
     server.on("error", (error) => {
