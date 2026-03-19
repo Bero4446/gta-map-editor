@@ -3,38 +3,51 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>GTA RP Map</title>
+  <title>LSV-Map Editor</title>
 
-  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
   <link rel="stylesheet" href="style.css" />
-
-  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 </head>
 <body>
-  <div class="topbar">
-    <div class="logo">GTA RP MAP</div>
+  <header class="topbar">
+    <div class="logo">LSV-Map Editor</div>
 
     <div class="top-actions">
-      <input id="globalSearch" class="top-search" placeholder="🔍 Marker suchen" />
+      <input
+        id="globalSearch"
+        class="top-search"
+        type="text"
+        placeholder="🔎 Marker suchen..."
+      />
+
       <div id="syncStatus" class="sync-pill offline">● Offline</div>
+      <div id="loginStatus">Nicht eingeloggt</div>
+
       <div id="roleBadges" class="role-badges"></div>
+
       <button id="discordLogin">Discord Login</button>
       <button id="logoutBtn" class="secondary hidden">Logout</button>
-      <span id="loginStatus">Nicht eingeloggt</span>
     </div>
-  </div>
+  </header>
 
   <div id="mapWrap">
     <div id="map"></div>
 
-    <div id="panel" class="open">
-      <div id="panelToggle">☰</div>
+    <aside id="panel">
+      <div id="panelToggle">❮</div>
 
       <div class="tabs">
-        <button class="tab editor-only hidden" data-tab="editor">Editor</button>
-        <button class="tab dashboard-only hidden" data-tab="dashboard">Dashboard</button>
         <button class="tab active" data-tab="filter">Filter</button>
+        <button class="tab editor-only hidden" data-tab="editor">Editor</button>
+        <button class="tab dashboard-only hidden" data-tab="dashboard">Control Center</button>
         <button class="tab" data-tab="stats">Statistik</button>
+        <button class="tab admin-only hidden" data-tab="recognition">Bild-Erkennung</button>
+        <button class="tab admin-only hidden" data-tab="references">Referenzen</button>
         <button class="tab admin-only hidden" data-tab="export">Export</button>
         <button class="tab admin-only hidden" data-tab="history">Verlauf</button>
         <button class="tab vip-only hidden" data-tab="vip">VIP</button>
@@ -77,8 +90,16 @@
         </label>
 
         <div id="markerRadiusWrap" class="hidden">
-          <input id="markerRadius" type="number" min="50" step="50" placeholder="Gebietsradius in Metern" />
-          <div class="coord-info">Fraktionsgebiete werden als Kreis um den Marker-Mittelpunkt angezeigt.</div>
+          <input
+            id="markerRadius"
+            type="number"
+            min="50"
+            step="50"
+            placeholder="Gebietsradius in Metern"
+          />
+          <div class="coord-info">
+            Fraktionsgebiete werden als Kreis um den Marker-Mittelpunkt angezeigt.
+          </div>
         </div>
 
         <div class="coord-row">
@@ -190,14 +211,17 @@
             <div class="dashboard-label">Marker gesamt</div>
             <div id="dashboardTotalMarkers" class="dashboard-value">0</div>
           </div>
+
           <div class="dashboard-card">
             <div class="dashboard-label">Favoriten</div>
             <div id="dashboardFavorites" class="dashboard-value">0</div>
           </div>
+
           <div class="dashboard-card">
             <div class="dashboard-label">Fraktionsgebiete</div>
             <div id="dashboardTerritories" class="dashboard-value">0</div>
           </div>
+
           <div class="dashboard-card">
             <div class="dashboard-label">Schwarzmarkt</div>
             <div id="dashboardBlackmarket" class="dashboard-value">0</div>
@@ -244,6 +268,135 @@
         <div id="statVip" class="stat-card vip-only hidden">Schwarzmarkt: 0</div>
       </div>
 
+      <div class="tab-content admin-only hidden" id="recognition">
+        <h2>Bild-Erkennung</h2>
+
+        <div class="status-box">
+          Lade ein Kartenbild oder Ingame-Bild hoch. Das System erstellt Top-3 Vorschläge und bereitet einen neuen Marker vor.
+        </div>
+
+        <div class="recognition-actions">
+          <button id="uploadMapImageBtn">🗺️ Kartenbild hochladen</button>
+          <button id="uploadIngameImageBtn" class="secondary">🎮 Ingame-Bild hochladen</button>
+        </div>
+
+        <input id="mapImageUpload" type="file" accept="image/*" class="hidden" />
+        <input id="ingameImageUpload" type="file" accept="image/*" class="hidden" />
+
+        <div class="recognition-layout">
+          <div class="recognition-panel">
+            <h3>Bild-Vorschau</h3>
+
+            <div id="recognitionPreviewWrap" class="recognition-preview empty">
+              <div id="recognitionPreviewEmpty" class="status-box">
+                Noch kein Bild hochgeladen.
+              </div>
+              <img
+                id="recognitionPreviewImage"
+                class="recognition-preview-image hidden"
+                src=""
+                alt="Bild-Vorschau"
+              />
+            </div>
+
+            <div class="recognition-meta">
+              <div class="recognition-meta-row">
+                <span>Bildtyp</span>
+                <strong id="recognitionImageType">-</strong>
+              </div>
+              <div class="recognition-meta-row">
+                <span>Status</span>
+                <strong id="recognitionStatus">-</strong>
+              </div>
+              <div class="recognition-meta-row">
+                <span>Upload von</span>
+                <strong id="recognitionUploadedBy">-</strong>
+              </div>
+            </div>
+
+            <div class="button-row">
+              <button id="recognitionUseManualBtn" class="secondary">
+                Manuell auf Karte setzen
+              </button>
+              <button id="recognitionRejectBtn" class="secondary">
+                Treffer ablehnen
+              </button>
+            </div>
+          </div>
+
+          <div class="recognition-panel">
+            <h3>Top 3 Treffer</h3>
+
+            <div id="recognitionMatches" class="recognition-match-list">
+              <div class="status-box">Noch keine Erkennung durchgeführt.</div>
+            </div>
+
+            <div class="status-box" id="recognitionHint">
+              Der beste Treffer wird vorausgewählt und auf der Karte markiert.
+            </div>
+          </div>
+        </div>
+
+        <div class="recognition-panel">
+          <h3>Neuen Marker vorbereiten</h3>
+
+          <div class="status-box">
+            Nach Bestätigung werden Koordinaten und Bild in den Marker-Editor übernommen.
+          </div>
+
+          <div class="button-row">
+            <button id="recognitionApplyBtn">Treffer in Editor übernehmen</button>
+            <button id="recognitionRefreshBtn" class="secondary">Uploads aktualisieren</button>
+          </div>
+        </div>
+
+        <div class="recognition-panel">
+          <h3>Letzte Uploads</h3>
+          <div id="recognitionRecentUploads" class="recognition-upload-list">
+            <div class="status-box">Noch keine Uploads.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-content admin-only hidden" id="references">
+        <h2>Referenzen</h2>
+
+        <div class="status-box">
+          Bestätigte Lernbilder werden hier gespeichert. Du kannst Kartenbilder und Ingame-Bilder getrennt verwalten.
+        </div>
+
+        <div class="button-row">
+          <button id="referencesShowMapBtn">🗺️ Kartenbilder</button>
+          <button id="referencesShowIngameBtn" class="secondary">🎮 Ingame-Bilder</button>
+        </div>
+
+        <div class="recognition-overview-grid">
+          <div class="dashboard-card">
+            <div class="dashboard-label">Uploads gesamt</div>
+            <div id="recognitionTotalUploads" class="dashboard-value">0</div>
+          </div>
+
+          <div class="dashboard-card">
+            <div class="dashboard-label">Referenzen gesamt</div>
+            <div id="recognitionTotalReferences" class="dashboard-value">0</div>
+          </div>
+
+          <div class="dashboard-card">
+            <div class="dashboard-label">Bestätigt</div>
+            <div id="recognitionConfirmedCount" class="dashboard-value">0</div>
+          </div>
+
+          <div class="dashboard-card">
+            <div class="dashboard-label">Abgelehnt</div>
+            <div id="recognitionRejectedCount" class="dashboard-value">0</div>
+          </div>
+        </div>
+
+        <div id="referenceList" class="reference-grid">
+          <div class="status-box">Noch keine Referenzen geladen.</div>
+        </div>
+      </div>
+
       <div class="tab-content admin-only hidden" id="export">
         <h2>Export &amp; Import</h2>
 
@@ -257,7 +410,7 @@
           <button id="exportBackupBtn" class="secondary">Letztes Backup anzeigen</button>
         </div>
 
-        <hr>
+        <hr />
 
         <div class="status-box">
           Import überschreibt den aktuellen Datenbestand vollständig.
@@ -288,7 +441,7 @@
           Schwarzmarkt-Marker sind nur für VIP/Admin sichtbar.
         </div>
       </div>
-    </div>
+    </aside>
   </div>
 
   <div id="imageModal" class="image-modal hidden">
@@ -297,6 +450,11 @@
     <button id="closeImageModal" class="image-modal-close">✕</button>
   </div>
 
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+  ></script>
   <script src="script.js"></script>
 </body>
 </html>
