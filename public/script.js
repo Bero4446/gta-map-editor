@@ -1,4 +1,4 @@
-const MAP_IMAGE = "GTAV-HD-MAP-satellite.jpg";
+const MAP_IMAGE = "GTAV-HD-MAP-satellite.jpeg";
 const MAP_SIZE = 8192;
 const BOUNDS = [[0, 0], [MAP_SIZE, MAP_SIZE]];
 
@@ -12,6 +12,14 @@ const CATEGORY_META = {
   Systempunkteshop: { icon: "🛒", statId: "statPointShop", label: "Systempunkteshop" },
   Fraktion: { icon: "🛡️", statId: "statFaction", label: "Fraktion" },
   Fraktionsgebiet: { icon: "🗺️", statId: "statTerritory", label: "Fraktionsgebiete", territory: true }
+};
+
+const RECOGNITION_STATUS_LABELS = {
+  "neu": "Neu",
+  "automatisch erkannt": "Automatisch erkannt",
+  "manuell korrigiert": "Manuell korrigiert",
+  "bestätigt": "Bestätigt",
+  "abgelehnt": "Abgelehnt"
 };
 
 const map = L.map("map", {
@@ -33,6 +41,10 @@ let markerLayers = [];
 let markerLayerById = new Map();
 let selectedMarkerId = null;
 let selectedHistoryMarkerId = null;
+let dashboardState = null;
+let liveSyncSource = null;
+let lastSyncMessageAt = null;
+
 let currentUser = {
   loggedIn: false,
   username: "",
@@ -46,9 +58,17 @@ let currentUser = {
   id: ""
 };
 
-let dashboardState = null;
-let liveSyncSource = null;
-let lastSyncMessageAt = null;
+let recognitionState = {
+  currentUpload: null,
+  currentMatches: [],
+  selectedMatch: null,
+  overview: null,
+  uploads: [],
+  references: [],
+  referenceType: "map",
+  manualPlacementMode: false,
+  markerLayer: null
+};
 
 const icons = Object.fromEntries(
   Object.entries(CATEGORY_META).map(([key, meta]) => [key, createEmojiIcon(meta.icon)])
@@ -87,24 +107,12 @@ function isVipOrAdmin() {
   return !!currentUser.loggedIn && (!!currentUser.isVip || !!currentUser.isAdmin);
 }
 
-function isSupport() {
-  return !!currentUser.loggedIn && !!currentUser.isSupport;
-}
-
-function isMapper() {
-  return !!currentUser.loggedIn && !!currentUser.isMapper;
-}
-
 function canEditMarkers() {
   return !!currentUser.loggedIn && !!currentUser.canEdit;
 }
 
 function canViewDashboard() {
   return !!currentUser.loggedIn && !!currentUser.canViewDashboard;
-}
-
-function canAccessAdminArea() {
-  return canEditMarkers();
 }
 
 function roundCoord(value) {
@@ -128,7 +136,6 @@ function escapeJsString(str) {
 
 function formatDateTime(value) {
   if (!value) return "-";
-
   try {
     return new Date(value).toLocaleString("de-DE");
   } catch {
@@ -139,6 +146,7 @@ function formatDateTime(value) {
 function formatValue(value) {
   if (value === null || typeof value === "undefined" || value === "") return "-";
   if (typeof value === "boolean") return value ? "Ja" : "Nein";
+  if (typeof value === "number") return Number(value).toFixed(2);
   return String(value);
 }
 
@@ -252,7 +260,6 @@ function clearForm() {
   document.getElementById("markerRadius").value = "200";
   document.getElementById("markerLat").value = "";
   document.getElementById("markerLng").value = "";
-
   const img = document.getElementById("markerImage");
   if (img) img.value = "";
 
@@ -279,6 +286,26 @@ function fillForm(marker) {
 
   updateRadiusFieldVisibility();
   updateUserUi();
+}
+
+function prepareNewMarkerFromRecognition(match, imageUrl = "") {
+  selectedMarkerId = null;
+  document.getElementById("markerName").value = "";
+  document.getElementById("markerDescription").value = "";
+  document.getElementById("markerCategory").value = "Dealer";
+  document.getElementById("markerOwner").value = currentUser.username || "";
+  document.getElementById("markerFavorite").checked = false;
+  document.getElementById("markerRadius").value = "200";
+  document.getElementById("markerLat").value = roundCoord(match.lat);
+  document.getElementById("markerLng").value = roundCoord(match.lng);
+
+  const editModeInfo = document.getElementById("editModeInfo");
+  if (editModeInfo) editModeInfo.classList.add("hidden");
+
+  recognitionState.preparedImageUrl = imageUrl || "";
+  updateRadiusFieldVisibility();
+  switchToTab("editor");
+  showMessage("Treffer wurde in den Editor übernommen.");
 }
 
 async function fetchUser() {
@@ -338,6 +365,7 @@ function updateUserUi() {
     ensureAllowedActiveTab();
     renderSearchResults();
     renderDashboard();
+    renderRecognitionSection();
     return;
   }
 
@@ -356,6 +384,7 @@ function updateUserUi() {
       ? `Eingeloggt als ${currentUser.username} (${roles.join(" / ")})`
       : `Eingeloggt als ${currentUser.username}`;
   }
+
   if (historyHint) {
     historyHint.textContent = isAdmin()
       ? "Wähle einen Marker aus, um seinen Verlauf zu sehen und alte Versionen wiederherzustellen."
@@ -405,6 +434,7 @@ function updateUserUi() {
   ensureAllowedActiveTab();
   renderSearchResults();
   renderDashboard();
+  renderRecognitionSection();
 }
 
 async function loadMarkers() {
@@ -428,9 +458,7 @@ async function saveMarkers() {
     headers: {
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({
-      markers
-    })
+    body: JSON.stringify({ markers })
   });
 
   const data = await response.json();
@@ -546,6 +574,36 @@ function focusMarkerById(id, openPopup = true) {
   }
 }
 
+function clearRecognitionMarker() {
+  if (recognitionState.markerLayer) {
+    map.removeLayer(recognitionState.markerLayer);
+    recognitionState.markerLayer = null;
+  }
+}
+
+function setRecognitionMapMarker(lat, lng, label = "Erkannter Treffer") {
+  clearRecognitionMarker();
+
+  recognitionState.markerLayer = L.circleMarker([Number(lat), Number(lng)], {
+    radius: 12,
+    color: "#5a78ff",
+    weight: 3,
+    fillColor: "#5a78ff",
+    fillOpacity: 0.25
+  }).addTo(map);
+
+  recognitionState.markerLayer.bindPopup(`
+    <div>
+      <div class="popup-title">${escapeHtml(label)}</div>
+      <div class="popup-meta">Lat: ${Number(lat).toFixed(2)} | Lng: ${Number(lng).toFixed(2)}</div>
+    </div>
+  `);
+
+  map.flyTo([Number(lat), Number(lng)], Math.max(map.getZoom(), -1.4), {
+    duration: 0.55
+  });
+}
+
 function renderMarkers() {
   markerLayers.forEach((layer) => {
     if (layer.group) {
@@ -557,7 +615,9 @@ function renderMarkers() {
   markerLayerById = new Map();
 
   getSortedMarkers().forEach((marker) => {
-    if (!shouldShowMarker(marker)) return;    const group = L.layerGroup();
+    if (!shouldShowMarker(marker)) return;
+
+    const group = L.layerGroup();
     let territoryLayer = null;
 
     if (marker.category === "Fraktionsgebiet") {
@@ -716,7 +776,7 @@ function renderSearchResults() {
 async function uploadImageIfNeeded() {
   const fileInput = document.getElementById("markerImage");
   const file = fileInput?.files?.[0];
-  if (!file) return null;
+  if (!file) return recognitionState.preparedImageUrl || null;
 
   const formData = new FormData();
   formData.append("file", file);
@@ -732,7 +792,7 @@ async function uploadImageIfNeeded() {
     throw new Error(data.error || "Bild konnte nicht hochgeladen werden.");
   }
 
-  return data.path || "";
+  return data.path || recognitionState.preparedImageUrl || "";
 }
 
 async function copyToClipboard(text, successText = "Kopiert.") {
@@ -801,6 +861,14 @@ function downloadJson(filename, data) {
   URL.revokeObjectURL(url);
 }
 
+function cryptoRandomId() {
+  if (window.crypto && window.crypto.randomUUID) {
+    return window.crypto.randomUUID();
+  }
+
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
 async function handleSaveMarker() {
   if (!canEditMarkers()) {
     showMessage("Nur Admins oder Mapper dürfen Marker erstellen oder bearbeiten.", "error");
@@ -856,7 +924,7 @@ async function handleSaveMarker() {
         radius,
         lat: roundCoord(lat),
         lng: roundCoord(lng),
-        image: imagePath || "",
+        image: imagePath || recognitionState.preparedImageUrl || "",
         createdBy: currentUser.username,
         updatedBy: currentUser.username,
         createdAt: new Date().toISOString(),
@@ -865,7 +933,15 @@ async function handleSaveMarker() {
     }
 
     await saveMarkers();
+
+    if (isAdmin() && recognitionState.currentUpload && recognitionState.selectedMatch) {
+      await confirmRecognitionSelection().catch((error) => {
+        console.error(error);
+      });
+    }
+
     clearForm();
+    recognitionState.preparedImageUrl = "";
     renderMarkers();
     updateStats();
     renderSearchResults();
@@ -874,14 +950,6 @@ async function handleSaveMarker() {
     console.error(error);
     showMessage(error.message || "Marker konnte nicht gespeichert werden.", "error");
   }
-}
-
-function cryptoRandomId() {
-  if (window.crypto && window.crypto.randomUUID) {
-    return window.crypto.randomUUID();
-  }
-
-  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 window.editMarker = function (id) {
@@ -974,7 +1042,8 @@ window.deleteMarker = async function (id) {
 };
 
 function renderHistory(history) {
-  const title = document.getElementById("historyTitle");  const list = document.getElementById("historyList");
+  const title = document.getElementById("historyTitle");
+  const list = document.getElementById("historyList");
 
   if (!title || !list) return;
 
@@ -1271,6 +1340,11 @@ function startLiveSync() {
       if (canViewDashboard()) {
         await fetchDashboard();
       }
+      if (isAdmin()) {
+        await refreshRecognitionUploads();
+        await refreshRecognitionReferences();
+        await refreshRecognitionOverview();
+      }
       if (payload.actor && payload.actor !== currentUser.username) {
         showMessage(`Live-Update von ${payload.actor} übernommen.`);
       }
@@ -1294,7 +1368,481 @@ function startLiveSync() {
   liveSyncSource.onerror = () => {
     setSyncStatus("offline", "Neu verbinden…");
   };
-}map.on("click", (e) => {
+}
+
+function getScoreClass(score) {
+  if (Number(score) >= 80) return "high";
+  if (Number(score) >= 55) return "medium";
+  return "low";
+}
+
+function getStatusLabel(status) {
+  return RECOGNITION_STATUS_LABELS[status] || status || "-";
+}
+
+function renderRecognitionSection() {
+  renderRecognitionPreview();
+  renderRecognitionMatches();
+  renderRecognitionUploads();
+  renderRecognitionReferences();
+  renderRecognitionOverview();
+}
+
+function renderRecognitionPreview() {
+  const wrap = document.getElementById("recognitionPreviewWrap");
+  const empty = document.getElementById("recognitionPreviewEmpty");
+  const image = document.getElementById("recognitionPreviewImage");
+  const typeEl = document.getElementById("recognitionImageType");
+  const statusEl = document.getElementById("recognitionStatus");
+  const uploadedByEl = document.getElementById("recognitionUploadedBy");
+
+  if (!wrap || !empty || !image || !typeEl || !statusEl || !uploadedByEl) return;
+
+  const upload = recognitionState.currentUpload;
+
+  if (!upload) {
+    wrap.classList.add("empty");
+    empty.classList.remove("hidden");
+    image.classList.add("hidden");
+    image.src = "";
+    typeEl.textContent = "-";
+    statusEl.textContent = "-";
+    uploadedByEl.textContent = "-";
+    return;
+  }
+
+  wrap.classList.remove("empty");
+  empty.classList.add("hidden");
+  image.classList.remove("hidden");
+  image.src = upload.imageUrl || "";
+  typeEl.textContent = upload.imageType === "ingame" ? "Ingame-Bild" : "Kartenbild";
+  statusEl.textContent = getStatusLabel(upload.status);
+  uploadedByEl.textContent = upload.uploadedBy || "-";
+}
+
+function selectRecognitionMatch(match) {
+  recognitionState.selectedMatch = match || null;
+
+  if (match) {
+    setRecognitionMapMarker(match.lat, match.lng, `${match.markerName} • ${match.score}%`);
+  } else {
+    clearRecognitionMarker();
+  }
+
+  renderRecognitionMatches();
+}
+
+function renderRecognitionMatches() {
+  const list = document.getElementById("recognitionMatches");
+  if (!list) return;
+
+  const matches = Array.isArray(recognitionState.currentMatches) ? recognitionState.currentMatches : [];
+
+  if (!matches.length) {
+    list.innerHTML = `<div class="status-box">Noch keine Erkennung durchgeführt.</div>`;
+    return;
+  }
+
+  list.innerHTML = matches.map((match, index) => {
+    const selected = recognitionState.selectedMatch?.markerId === match.markerId ? "selected" : "";
+    return `
+      <div class="recognition-match-card ${selected}">
+        <div class="recognition-match-top">
+          <div class="recognition-match-title">#${index + 1} ${escapeHtml(match.markerName || match.markerId)}</div>
+          <div class="score-pill ${getScoreClass(match.score)}">${escapeHtml(String(match.score))}%</div>
+        </div>
+
+        <div class="recognition-match-meta">
+          Marker-ID: ${escapeHtml(match.markerId || "-")}<br>
+          Koordinaten: ${escapeHtml(formatValue(match.lat))}, ${escapeHtml(formatValue(match.lng))}<br>
+          Grund: ${escapeHtml(match.reason || "-")}
+        </div>
+
+        <div class="recognition-card-actions">
+          <button onclick="window.chooseRecognitionMatch('${escapeJsString(match.markerId)}')">
+            ${selected ? "Ausgewählt" : "Diesen Treffer wählen"}
+          </button>
+          <button class="secondary" onclick="window.focusRecognitionMatch('${escapeJsString(match.markerId)}')">Auf Karte</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderRecognitionUploads() {
+  const list = document.getElementById("recognitionRecentUploads");
+  if (!list) return;
+
+  const uploads = Array.isArray(recognitionState.uploads) ? recognitionState.uploads.slice(0, 8) : [];
+
+  if (!uploads.length) {
+    list.innerHTML = `<div class="status-box">Noch keine Uploads.</div>`;
+    return;
+  }
+
+  list.innerHTML = uploads.map((upload) => `
+    <div class="recognition-upload-card">
+      <div class="recognition-upload-top">
+        <div class="recognition-upload-title">${escapeHtml(upload.fileName || `Upload #${upload.uploadId}`)}</div>
+        <div class="type-pill">${upload.imageType === "ingame" ? "Ingame" : "Karte"}</div>
+      </div>
+
+      <div class="recognition-upload-meta">
+        Status: <span class="status-pill ${escapeHtml(String(upload.status || '').toLowerCase().replace(/\s+/g, '-'))}">${escapeHtml(getStatusLabel(upload.status))}</span><br>
+        Upload von: ${escapeHtml(upload.uploadedBy || "-")}<br>
+        Erstellt: ${escapeHtml(formatDateTime(upload.createdAt))}
+      </div>
+
+      <div class="recognition-card-actions">
+        <button onclick="window.loadRecognitionUpload(${Number(upload.uploadId)})">Öffnen</button>
+        <button class="secondary" onclick="window.openImageModal('${escapeJsString(upload.imageUrl || "")}')">Bild</button>
+      </div>
+    </div>
+  `).join("");
+}
+
+function renderRecognitionOverview() {
+  const totalUploads = document.getElementById("recognitionTotalUploads");
+  const totalRefs = document.getElementById("recognitionTotalReferences");
+  const confirmed = document.getElementById("recognitionConfirmedCount");
+  const rejected = document.getElementById("recognitionRejectedCount");
+
+  if (!totalUploads || !totalRefs || !confirmed || !rejected) return;
+
+  const overview = recognitionState.overview || {};
+  totalUploads.textContent = String(overview.totalUploads || 0);
+  totalRefs.textContent = String(overview.totalReferences || 0);
+
+  const breakdown = Array.isArray(overview.statusBreakdown) ? overview.statusBreakdown : [];
+  const confirmedItem = breakdown.find((entry) => entry.status === "bestätigt");
+  const rejectedItem = breakdown.find((entry) => entry.status === "abgelehnt");
+
+  confirmed.textContent = String(confirmedItem?.count || 0);
+  rejected.textContent = String(rejectedItem?.count || 0);
+}
+
+function renderRecognitionReferences() {
+  const grid = document.getElementById("referenceList");
+  if (!grid) return;
+
+  const references = Array.isArray(recognitionState.references) ? recognitionState.references : [];
+
+  if (!references.length) {
+    grid.innerHTML = `<div class="status-box">Noch keine Referenzen geladen.</div>`;
+    return;
+  }
+
+  grid.innerHTML = references.map((ref) => `
+    <div class="reference-card">
+      ${ref.imageUrl ? `<img class="reference-image" src="${escapeHtml(ref.imageUrl)}" alt="Referenzbild" ondblclick="window.openImageModal('${escapeJsString(ref.imageUrl)}')">` : ""}
+      <div class="reference-content">
+        <div class="reference-top">
+          <div class="reference-title">${escapeHtml(ref.markerName || ref.markerId || "Unbekannt")}</div>
+          <div class="type-pill">${ref.imageType === "ingame" ? "Ingame" : "Karte"}</div>
+        </div>
+
+        <div class="reference-meta">
+          Marker-ID: ${escapeHtml(ref.markerId || "-")}<br>
+          Status: ${escapeHtml(getStatusLabel(ref.status))}<br>
+          Koordinaten: ${escapeHtml(formatValue(ref.lat))}, ${escapeHtml(formatValue(ref.lng))}<br>
+          Erstellt von: ${escapeHtml(ref.createdBy || "-")}<br>
+          Erstellt: ${escapeHtml(formatDateTime(ref.createdAt))}
+        </div>
+
+        <div class="reference-actions">
+          <button class="secondary" onclick="window.openImageModal('${escapeJsString(ref.imageUrl || "")}')">Bild</button>
+          <button class="secondary" onclick="window.focusReference('${escapeJsString(ref.markerId || "")}', ${Number(ref.lat ?? 0)}, ${Number(ref.lng ?? 0)})">Auf Karte</button>
+          <button class="secondary" onclick="window.deleteReference(${Number(ref.referenceId)})">Löschen</button>
+        </div>
+      </div>
+    </div>
+  `).join("");
+}
+
+async function refreshRecognitionOverview() {
+  if (!isAdmin()) return;
+
+  try {
+    const res = await fetch("/api/image-intelligence/overview");
+    const data = await res.json();
+    if (!res.ok || data.success === false) {
+      throw new Error(data.error || "Übersicht konnte nicht geladen werden.");
+    }
+
+    recognitionState.overview = data;
+    renderRecognitionOverview();
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+async function refreshRecognitionUploads() {
+  if (!isAdmin()) return;
+
+  try {
+    const res = await fetch("/api/image-intelligence/uploads");
+    const data = await res.json();
+    if (!res.ok || data.success === false) {
+      throw new Error(data.error || "Uploads konnten nicht geladen werden.");
+    }
+
+    recognitionState.uploads = Array.isArray(data.uploads) ? data.uploads : [];
+
+    if (recognitionState.currentUpload) {
+      const fresh = recognitionState.uploads.find((entry) => entry.uploadId === recognitionState.currentUpload.uploadId);
+      if (fresh) {
+        recognitionState.currentUpload = fresh;
+        recognitionState.currentMatches = Array.isArray(fresh.matches) ? fresh.matches : [];
+        if (recognitionState.currentMatches.length) {
+          const selectedStillExists = recognitionState.currentMatches.find((entry) => entry.markerId === recognitionState.selectedMatch?.markerId);
+          recognitionState.selectedMatch = selectedStillExists || recognitionState.currentMatches[0];
+        } else {
+          recognitionState.selectedMatch = null;
+        }
+      }
+    }
+
+    renderRecognitionUploads();
+    renderRecognitionPreview();
+    renderRecognitionMatches();
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+async function refreshRecognitionReferences(type = recognitionState.referenceType || "map") {
+  if (!isAdmin()) return;
+
+  try {
+    recognitionState.referenceType = type;
+    const res = await fetch(`/api/image-intelligence/references?type=${encodeURIComponent(type)}`);
+    const data = await res.json();
+    if (!res.ok || data.success === false) {
+      throw new Error(data.error || "Referenzen konnten nicht geladen werden.");
+    }
+
+    recognitionState.references = Array.isArray(data.references) ? data.references : [];
+    renderRecognitionReferences();
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+async function uploadRecognitionImage(imageType, file) {
+  if (!isAdmin()) return;
+  if (!file) return;
+
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("imageType", imageType);
+
+  try {
+    showMessage("Bild wird verarbeitet...");
+    const res = await fetch("/api/image-intelligence/upload", {
+      method: "POST",
+      body: formData
+    });
+
+    const data = await res.json();
+
+    if (!res.ok || data.success === false) {
+      throw new Error(data.error || "Bild konnte nicht erkannt werden.");
+    }
+
+    recognitionState.currentUpload = data.upload || null;
+    recognitionState.currentMatches = Array.isArray(data.matches) ? data.matches : [];
+    recognitionState.selectedMatch = recognitionState.currentMatches[0] || null;
+    recognitionState.manualPlacementMode = false;
+
+    if (recognitionState.selectedMatch) {
+      setRecognitionMapMarker(
+        recognitionState.selectedMatch.lat,
+        recognitionState.selectedMatch.lng,
+        `${recognitionState.selectedMatch.markerName} • ${recognitionState.selectedMatch.score}%`
+      );
+    } else {
+      clearRecognitionMarker();
+    }
+
+    renderRecognitionSection();
+    switchToTab("recognition");
+    await refreshRecognitionUploads();
+    await refreshRecognitionReferences();
+    await refreshRecognitionOverview();
+    showMessage("Bild erkannt. Treffer wurden vorbereitet.");
+  } catch (error) {
+    console.error(error);
+    showMessage(error.message || "Bild konnte nicht verarbeitet werden.", "error");
+  }
+}
+
+window.chooseRecognitionMatch = function (markerId) {
+  const match = recognitionState.currentMatches.find((entry) => entry.markerId === markerId);
+  if (!match) return;
+  selectRecognitionMatch(match);
+};
+
+window.focusRecognitionMatch = function (markerId) {
+  const match = recognitionState.currentMatches.find((entry) => entry.markerId === markerId);
+  if (!match) return;
+  selectRecognitionMatch(match);
+};
+
+window.loadRecognitionUpload = function (uploadId) {
+  const upload = recognitionState.uploads.find((entry) => Number(entry.uploadId) === Number(uploadId));
+  if (!upload) return;
+
+  recognitionState.currentUpload = upload;
+  recognitionState.currentMatches = Array.isArray(upload.matches) ? upload.matches : [];
+  recognitionState.selectedMatch = recognitionState.currentMatches[0] || null;
+  recognitionState.manualPlacementMode = false;
+
+  if (recognitionState.selectedMatch) {
+    setRecognitionMapMarker(
+      recognitionState.selectedMatch.lat,
+      recognitionState.selectedMatch.lng,
+      `${recognitionState.selectedMatch.markerName} • ${recognitionState.selectedMatch.score}%`
+    );
+  } else {
+    clearRecognitionMarker();
+  }
+
+  renderRecognitionSection();
+  switchToTab("recognition");
+};
+
+window.focusReference = function (markerId, lat, lng) {
+  if (markerId) {
+    focusMarkerById(markerId, true);
+    return;
+  }
+
+  if (Number.isFinite(lat) && Number.isFinite(lng)) {
+    setRecognitionMapMarker(lat, lng, "Referenz");
+  }
+};
+
+window.deleteReference = async function (referenceId) {
+  if (!isAdmin()) return;
+  if (!confirm("Referenz wirklich löschen?")) return;
+
+  try {
+    const res = await fetch(`/api/image-intelligence/references/${encodeURIComponent(referenceId)}`, {
+      method: "DELETE"
+    });
+    const data = await res.json();
+    if (!res.ok || data.success === false) {
+      throw new Error(data.error || "Referenz konnte nicht gelöscht werden.");
+    }
+
+    await refreshRecognitionReferences(recognitionState.referenceType || "map");
+    await refreshRecognitionOverview();
+    showMessage("Referenz gelöscht.");
+  } catch (error) {
+    console.error(error);
+    showMessage(error.message || "Referenz konnte nicht gelöscht werden.", "error");
+  }
+};
+
+async function confirmRecognitionSelection() {
+  if (!isAdmin()) return;
+  if (!recognitionState.currentUpload || !recognitionState.selectedMatch) return;
+
+  const lat = Number(document.getElementById("markerLat").value);
+  const lng = Number(document.getElementById("markerLng").value);
+
+  const res = await fetch("/api/image-intelligence/confirm", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      uploadId: recognitionState.currentUpload.uploadId,
+      markerId: recognitionState.selectedMatch.markerId,
+      lat,
+      lng,
+      status: recognitionState.manualPlacementMode ? "manuell korrigiert" : "bestätigt",
+      notes: recognitionState.manualPlacementMode ? "Position wurde manuell auf der Karte gesetzt." : "Treffer wurde übernommen."
+    })
+  });
+
+  const data = await res.json();
+  if (!res.ok || data.success === false) {
+    throw new Error(data.error || "Treffer konnte nicht bestätigt werden.");
+  }
+
+  recognitionState.currentUpload = null;
+  recognitionState.currentMatches = [];
+  recognitionState.selectedMatch = null;
+  recognitionState.manualPlacementMode = false;
+  clearRecognitionMarker();
+
+  await refreshRecognitionUploads();
+  await refreshRecognitionReferences();
+  await refreshRecognitionOverview();
+  renderRecognitionSection();
+}
+
+async function rejectCurrentRecognitionUpload() {
+  if (!isAdmin() || !recognitionState.currentUpload) return;
+  if (!confirm("Diesen Upload wirklich ablehnen?")) return;
+
+  try {
+    const res = await fetch(`/api/image-intelligence/reject/${encodeURIComponent(recognitionState.currentUpload.uploadId)}`, {
+      method: "POST"
+    });
+    const data = await res.json();
+    if (!res.ok || data.success === false) {
+      throw new Error(data.error || "Upload konnte nicht abgelehnt werden.");
+    }
+
+    recognitionState.currentUpload = null;
+    recognitionState.currentMatches = [];
+    recognitionState.selectedMatch = null;
+    recognitionState.manualPlacementMode = false;
+    clearRecognitionMarker();
+
+    await refreshRecognitionUploads();
+    await refreshRecognitionOverview();
+    renderRecognitionSection();
+    showMessage("Upload wurde abgelehnt.");
+  } catch (error) {
+    console.error(error);
+    showMessage(error.message || "Upload konnte nicht abgelehnt werden.", "error");
+  }
+}
+
+function enableManualRecognitionPlacement() {
+  if (!isAdmin() || !recognitionState.currentUpload) return;
+  recognitionState.manualPlacementMode = true;
+  switchToTab("recognition");
+  showMessage("Klicke jetzt auf die Karte, um die Position manuell zu setzen.");
+}
+
+function applyRecognitionToEditor() {
+  if (!isAdmin()) return;
+
+  const selected = recognitionState.selectedMatch;
+  const currentUpload = recognitionState.currentUpload;
+
+  if (!selected || !currentUpload) {
+    showMessage("Kein Treffer ausgewählt.", "error");
+    return;
+  }
+
+  prepareNewMarkerFromRecognition(
+    {
+      markerId: selected.markerId,
+      markerName: selected.markerName,
+      lat: selected.lat,
+      lng: selected.lng,
+      score: selected.score
+    },
+    currentUpload.imageUrl || ""
+  );
+}
+
+map.on("click", (e) => {
   const latInput = document.getElementById("markerLat");
   const lngInput = document.getElementById("markerLng");
 
@@ -1306,6 +1854,26 @@ function startLiveSync() {
   const coordInfo = document.getElementById("coordInfo");
   if (coordInfo) {
     coordInfo.textContent = `Koordinaten übernommen: Lat ${roundCoord(e.latlng.lat)} | Lng ${roundCoord(e.latlng.lng)}`;
+  }
+
+  if (isAdmin() && recognitionState.manualPlacementMode && recognitionState.currentUpload) {
+    const current = recognitionState.selectedMatch || recognitionState.currentMatches[0];
+    recognitionState.selectedMatch = {
+      ...(current || {
+        markerId: "",
+        markerName: "Manuell gesetzter Punkt",
+        score: 100,
+        reason: "Manuell auf Karte gesetzt"
+      }),
+      lat: roundCoord(e.latlng.lat),
+      lng: roundCoord(e.latlng.lng),
+      score: current?.score || 100,
+      reason: "Manuell auf Karte gesetzt"
+    };
+
+    setRecognitionMapMarker(e.latlng.lat, e.latlng.lng, "Manuell korrigiert");
+    renderRecognitionMatches();
+    showMessage("Manuelle Position gesetzt. Du kannst den Treffer jetzt in den Editor übernehmen.");
   }
 });
 
@@ -1448,9 +2016,54 @@ document.getElementById("logoutBtn")?.addEventListener("click", () => {
 document.getElementById("closeImageModal")?.addEventListener("click", window.closeImageModal);
 document.querySelector(".image-modal-backdrop")?.addEventListener("click", window.closeImageModal);
 
+document.getElementById("uploadMapImageBtn")?.addEventListener("click", () => {
+  if (!isAdmin()) return;
+  document.getElementById("mapImageUpload")?.click();
+});
+
+document.getElementById("uploadIngameImageBtn")?.addEventListener("click", () => {
+  if (!isAdmin()) return;
+  document.getElementById("ingameImageUpload")?.click();
+});
+
+document.getElementById("mapImageUpload")?.addEventListener("change", async (event) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  await uploadRecognitionImage("map", file);
+  event.target.value = "";
+});
+
+document.getElementById("ingameImageUpload")?.addEventListener("change", async (event) => {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  await uploadRecognitionImage("ingame", file);
+  event.target.value = "";
+});
+
+document.getElementById("recognitionUseManualBtn")?.addEventListener("click", enableManualRecognitionPlacement);
+document.getElementById("recognitionRejectBtn")?.addEventListener("click", rejectCurrentRecognitionUpload);
+document.getElementById("recognitionApplyBtn")?.addEventListener("click", applyRecognitionToEditor);
+document.getElementById("recognitionRefreshBtn")?.addEventListener("click", async () => {
+  await refreshRecognitionUploads();
+  await refreshRecognitionReferences();
+  await refreshRecognitionOverview();
+  showMessage("Bild-Erkennung aktualisiert.");
+});
+
+document.getElementById("referencesShowMapBtn")?.addEventListener("click", async () => {
+  recognitionState.referenceType = "map";
+  await refreshRecognitionReferences("map");
+});
+
+document.getElementById("referencesShowIngameBtn")?.addEventListener("click", async () => {
+  recognitionState.referenceType = "ingame";
+  await refreshRecognitionReferences("ingame");
+});
+
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
     window.closeImageModal();
+    recognitionState.manualPlacementMode = false;
   }
 });
 
@@ -1458,6 +2071,14 @@ document.addEventListener("keydown", (event) => {
   await fetchUser();
   await loadMarkers();
   await fetchDashboard();
+
+  if (isAdmin()) {
+    await refreshRecognitionOverview();
+    await refreshRecognitionUploads();
+    await refreshRecognitionReferences("map");
+  }
+
   clearForm();
+  renderRecognitionSection();
   startLiveSync();
 })();
