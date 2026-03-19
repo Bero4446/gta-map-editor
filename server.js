@@ -1980,4 +1980,30 @@ async function startServer() {
   }
 }
 
+async function startServer() {
+  try {
+    await createTables();
+    await ensureAiTables?.();
+    await seedFromJsonIfDatabaseIsEmpty();
+    scheduleAutomaticBackups();
+
+    const host = "0.0.0.0";
+    const server = app.listen(PORT, host, () => {
+      console.log(`Server läuft auf http://${host}:${PORT}`);
+      console.log(`Auto-Backups alle ${AUTO_BACKUP_INTERVAL_MINUTES} Minuten aktiv.`);
+    });
+
+    server.on("error", (error) => {
+      console.error("HTTP Server Fehler:", error);
+      process.exit(1);
+    });
+
+    server.keepAliveTimeout = 65000;
+    server.headersTimeout = 66000;
+  } catch (error) {
+    console.error("Serverstart fehlgeschlagen:", error.message);
+    process.exit(1);
+  }
+}
+
 startServer();
